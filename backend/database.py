@@ -1,6 +1,6 @@
 """
-数据库接口模块
-使用SQLite数据库存储人员、流动记录和地图数据
+数据库接口模块 - Doris 版本
+使用 Apache Doris 数据库存储人员、流动记录和地图数据
 
 主要功能：
 - 人员信息管理（增删改查）
@@ -19,23 +19,32 @@
 - flow_statistics: 流动统计表（各地区流动数量）
 
 作者：系统开发团队
-版本：1.0.0
+版本：2.0.0 - Doris 版本
 """
 import os
-import sqlite3
 import json
 import random
+import pymysql
 from typing import List, Dict, Optional
 from datetime import datetime
 
-# 数据库文件路径配置
-# 数据库文件存储在backend/data目录下
-DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'flu_monitoring.db')
+# Doris 数据库连接配置
+# 注意：根据 docker-compose.yaml，FE 节点的 MySQL 查询端口映射为 9031, 9032, 9033
+# 当前使用 FE-02 (端口 9032)，因为 FE-01 可能未启动
+DB_CONFIG = {
+    'host': os.getenv('DORIS_HOST', 'localhost'),
+    'port': int(os.getenv('DORIS_PORT', 9032)),
+    'user': os.getenv('DORIS_USER', 'root'),
+    'password': os.getenv('DORIS_PASSWORD', ''),
+    'database': os.getenv('DORIS_DATABASE', 'flu_monitoring'),
+    'charset': 'utf8mb4',
+    'cursorclass': pymysql.cursors.DictCursor
+}
 
 
 class Database:
     """
-    SQLite数据库操作类
+    Doris数据库操作类
     
     提供对数据库的所有操作接口，包括：
     - 数据库连接管理
@@ -54,38 +63,44 @@ class Database:
             # 执行操作
     """
     
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_config: Dict = None):
         """
         初始化数据库对象
         
         Args:
-            db_path: 数据库文件路径，如果为None则使用默认路径
+            db_config: 数据库配置字典，如果为None则使用默认配置
         """
-        self.db_path = db_path or DB_PATH
+        self.db_config = db_config or DB_CONFIG.copy()
         self.connection = None
-        self._ensure_data_dir()
-    
-    def _ensure_data_dir(self):
-        """
-        确保数据目录存在
-        如果目录不存在则创建
-        """
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
     
     def connect(self):
         """
         连接数据库
         
         功能：
-        - 建立SQLite数据库连接
-        - 设置行工厂为Row对象（可以通过列名访问）
+        - 建立Doris数据库连接（通过MySQL协议）
+        - 自动创建数据库（如果不存在）
         - 自动创建数据表（如果不存在）
         
         Returns:
-            sqlite3.Connection: 数据库连接对象
+            pymysql.Connection: 数据库连接对象
         """
-        self.connection = sqlite3.connect(self.db_path)
-        self.connection.row_factory = sqlite3.Row  # 使用Row对象，可以通过列名访问
+        # 先连接不指定数据库，创建数据库
+        temp_config = self.db_config.copy()
+        database = temp_config.pop('database')
+        
+        try:
+            temp_conn = pymysql.connect(**temp_config)
+            cursor = temp_conn.cursor()
+            # Doris 使用简化的 CREATE DATABASE 语法，不支持 CHARACTER SET 和 COLLATE
+            cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database}")
+            cursor.close()
+            temp_conn.close()
+        except Exception as e:
+            print(f'[WARN] 创建数据库失败（可能已存在）: {e}', flush=True)
+        
+        # 连接到指定数据库
+        self.connection = pymysql.connect(**self.db_config)
         self._create_tables()  # 确保所有表都存在
         return self.connection
     
@@ -115,179 +130,21 @@ class Database:
         """
         cursor = self.connection.cursor()
         
-        # 人员表
+        # 人员表 - 使用 Doris 的数据类型和表属性
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS people (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                id_card TEXT UNIQUE NOT NULL,
-                region TEXT NOT NULL,
-                age INTEGER NOT NULL,
-                phone TEXT NOT NULL,
-                status TEXT NOT NULL,
-                avatar TEXT,
-                last_update TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                gender TEXT,
-                occupation TEXT,
-                tags TEXT,
-                education_history TEXT,
-                work_history TEXT,
-                social_media TEXT
-            )
-        ''')
-        
-        # 添加新字段（如果表已存在，使用ALTER TABLE）
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN gender TEXT')
-        except sqlite3.OperationalError:
-            pass  # 字段已存在
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN occupation TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN tags TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN education_history TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN work_history TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN social_media TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN visit_records TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN flight_records TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN train_records TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN hometown TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN nationality TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN visa_type TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE people ADD COLUMN institution TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        # 重点人员表（支持多个类别）
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS key_persons (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                person_id INTEGER NOT NULL,
-                category TEXT NOT NULL,
-                priority_level INTEGER DEFAULT 1,
-                reason TEXT,
-                added_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE,
-                UNIQUE(person_id, category)
-            )
-        ''')
-        
-        # 创建重点人员索引
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_key_persons_category ON key_persons(category)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_key_persons_person ON key_persons(person_id)')
-        
-        # 流动记录表
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS movements (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                person_id INTEGER NOT NULL,
-                person_name TEXT,
-                avatar TEXT,
-                from_region TEXT NOT NULL,
-                to_region TEXT NOT NULL,
-                movement_time TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
-            )
-        ''')
-        
-        # 地图数据表（存储各省份的监测人数）
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS map_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                province_name TEXT UNIQUE NOT NULL,
-                value INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # 趋势数据表（存储每日的趋势数据）
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS trend_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT NOT NULL,
-                confirmed_count INTEGER NOT NULL DEFAULT 0,
-                suspected_count INTEGER NOT NULL DEFAULT 0,
-                recovered_count INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(date)
-            )
-        ''')
-        
-        # 流动统计表（存储各地区的流动数量）
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS flow_statistics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                region TEXT NOT NULL,
-                flow_count INTEGER NOT NULL DEFAULT 0,
-                period TEXT NOT NULL,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(region, period)
-            )
-        ''')
-        
-        # 本地人员表（用户导入的数据）
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS local_people (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                id_card TEXT,
-                region TEXT,
-                age INTEGER,
-                phone TEXT,
-                status TEXT,
-                avatar TEXT,
-                last_update TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                gender TEXT,
-                occupation TEXT,
+                id BIGINT NOT NULL AUTO_INCREMENT,
+                id_card VARCHAR(50) NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                region VARCHAR(100) NOT NULL,
+                age INT NOT NULL,
+                phone VARCHAR(20) NOT NULL,
+                status VARCHAR(20) NOT NULL,
+                avatar VARCHAR(500),
+                last_update DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                gender VARCHAR(10),
+                occupation VARCHAR(100),
                 tags TEXT,
                 education_history TEXT,
                 work_history TEXT,
@@ -295,126 +152,274 @@ class Database:
                 visit_records TEXT,
                 flight_records TEXT,
                 train_records TEXT,
-                hometown TEXT,
-                nationality TEXT,
-                visa_type TEXT,
-                institution TEXT
+                hometown VARCHAR(100),
+                nationality VARCHAR(50),
+                visa_type VARCHAR(50),
+                institution VARCHAR(200)
+            ) ENGINE=OLAP
+            UNIQUE KEY(id, id_card)
+            DISTRIBUTED BY HASH(id) BUCKETS 10
+            PROPERTIES (
+                "replication_num" = "1",
+                "storage_format" = "V2"
             )
         ''')
         
-        # 检查并添加缺失的列（表结构升级）
+        # 添加新字段（如果表已存在，使用ALTER TABLE）
+        columns_to_add = [
+            ('gender', 'VARCHAR(10)'),
+            ('occupation', 'VARCHAR(100)'),
+            ('tags', 'TEXT'),
+            ('education_history', 'TEXT'),
+            ('work_history', 'TEXT'),
+            ('social_media', 'TEXT'),
+            ('visit_records', 'TEXT'),
+            ('flight_records', 'TEXT'),
+            ('train_records', 'TEXT'),
+            ('hometown', 'VARCHAR(100)'),
+            ('nationality', 'VARCHAR(50)'),
+            ('visa_type', 'VARCHAR(50)'),
+            ('institution', 'VARCHAR(200)')
+        ]
+        
+        for col_name, col_type in columns_to_add:
+            try:
+                cursor.execute(f'ALTER TABLE people ADD COLUMN {col_name} {col_type}')
+            except Exception:
+                pass  # 字段已存在
+        
+        # 重点人员表（支持多个类别）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS key_persons (
+                id BIGINT NOT NULL AUTO_INCREMENT,
+                person_id BIGINT NOT NULL,
+                category VARCHAR(50) NOT NULL,
+                priority_level INT DEFAULT 1,
+                reason TEXT,
+                added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=OLAP
+            UNIQUE KEY(id, person_id, category)
+            DISTRIBUTED BY HASH(id) BUCKETS 10
+            PROPERTIES (
+                "replication_num" = "1",
+                "storage_format" = "V2"
+            )
+        ''')
+        
+        # 创建重点人员索引
         try:
-            cursor.execute("PRAGMA table_info(local_people)")
-            columns = [row[1] for row in cursor.fetchall()]
-            
-            # 检查并添加缺失的列
-            if 'last_update' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN last_update TEXT')
-            if 'created_at' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN created_at TEXT DEFAULT CURRENT_TIMESTAMP')
-            if 'gender' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN gender TEXT')
-            if 'occupation' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN occupation TEXT')
-            if 'tags' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN tags TEXT')
-            if 'education_history' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN education_history TEXT')
-            if 'work_history' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN work_history TEXT')
-            if 'social_media' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN social_media TEXT')
-            if 'visit_records' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN visit_records TEXT')
-            if 'flight_records' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN flight_records TEXT')
-            if 'train_records' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN train_records TEXT')
-            if 'hometown' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN hometown TEXT')
-            if 'nationality' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN nationality TEXT')
-            if 'visa_type' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN visa_type TEXT')
-            if 'institution' not in columns:
-                cursor.execute('ALTER TABLE local_people ADD COLUMN institution TEXT')
-        except Exception as e:
-            print(f'[WARN] 表结构升级失败: {e}', flush=True)
+            cursor.execute('CREATE INDEX idx_key_persons_category ON key_persons(category)')
+        except Exception:
+            pass
+        try:
+            cursor.execute('CREATE INDEX idx_key_persons_person ON key_persons(person_id)')
+        except Exception:
+            pass
+        
+        # 流动记录表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS movements (
+                id BIGINT NOT NULL AUTO_INCREMENT,
+                person_id BIGINT NOT NULL,
+                person_name VARCHAR(255),
+                avatar VARCHAR(500),
+                from_region VARCHAR(100) NOT NULL,
+                to_region VARCHAR(100) NOT NULL,
+                movement_time DATETIME NOT NULL,
+                status VARCHAR(20) NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=OLAP
+            DUPLICATE KEY(id)
+            DISTRIBUTED BY HASH(id) BUCKETS 10
+            PROPERTIES (
+                "replication_num" = "1",
+                "storage_format" = "V2"
+            )
+        ''')
+        
+        # 地图数据表（存储各省份的监测人数）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS map_data (
+                id BIGINT NOT NULL AUTO_INCREMENT,
+                province_name VARCHAR(100) NOT NULL,
+                value INT NOT NULL DEFAULT 0,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=OLAP
+            UNIQUE KEY(id, province_name)
+            DISTRIBUTED BY HASH(id) BUCKETS 10
+            PROPERTIES (
+                "replication_num" = "1",
+                "storage_format" = "V2"
+            )
+        ''')
+        
+        # 趋势数据表（存储每日的趋势数据）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS trend_data (
+                id BIGINT NOT NULL AUTO_INCREMENT,
+                date DATE NOT NULL,
+                confirmed_count INT NOT NULL DEFAULT 0,
+                suspected_count INT NOT NULL DEFAULT 0,
+                recovered_count INT NOT NULL DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=OLAP
+            UNIQUE KEY(id, date)
+            DISTRIBUTED BY HASH(id) BUCKETS 10
+            PROPERTIES (
+                "replication_num" = "1",
+                "storage_format" = "V2"
+            )
+        ''')
+        
+        # 流动统计表（存储各地区的流动数量）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS flow_statistics (
+                id BIGINT NOT NULL AUTO_INCREMENT,
+                region VARCHAR(100) NOT NULL,
+                period VARCHAR(20) NOT NULL,
+                flow_count INT NOT NULL DEFAULT 0,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=OLAP
+            UNIQUE KEY(id, region, period)
+            DISTRIBUTED BY HASH(id) BUCKETS 10
+            PROPERTIES (
+                "replication_num" = "1",
+                "storage_format" = "V2"
+            )
+        ''')
+        
+        # 本地人员表（用户导入的数据）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS local_people (
+                id BIGINT NOT NULL AUTO_INCREMENT,
+                name VARCHAR(255) NOT NULL,
+                id_card VARCHAR(50),
+                region VARCHAR(100),
+                age INT,
+                phone VARCHAR(20),
+                status VARCHAR(20),
+                avatar VARCHAR(500),
+                last_update DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                gender VARCHAR(10),
+                occupation VARCHAR(100),
+                tags TEXT,
+                education_history TEXT,
+                work_history TEXT,
+                social_media TEXT,
+                visit_records TEXT,
+                flight_records TEXT,
+                train_records TEXT,
+                hometown VARCHAR(100),
+                nationality VARCHAR(50),
+                visa_type VARCHAR(50),
+                institution VARCHAR(200)
+            ) ENGINE=OLAP
+            DUPLICATE KEY(id)
+            DISTRIBUTED BY HASH(id) BUCKETS 10
+            PROPERTIES (
+                "replication_num" = "1",
+                "storage_format" = "V2"
+            )
+        ''')
         
         # 创建索引
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_people_region ON people(region)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_people_status ON people(status)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_movements_person ON movements(person_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_movements_time ON movements(movement_time)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_trend_data_date ON trend_data(date)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_flow_statistics_region ON flow_statistics(region)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_local_people_id_card ON local_people(id_card)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_local_people_phone ON local_people(phone)')
+        indexes = [
+            ('idx_people_region', 'people', 'region'),
+            ('idx_people_status', 'people', 'status'),
+            ('idx_movements_person', 'movements', 'person_id'),
+            ('idx_movements_time', 'movements', 'movement_time'),
+            ('idx_trend_data_date', 'trend_data', 'date'),
+            ('idx_flow_statistics_region', 'flow_statistics', 'region'),
+            ('idx_local_people_id_card', 'local_people', 'id_card'),
+            ('idx_local_people_phone', 'local_people', 'phone')
+        ]
+        
+        for idx_name, table_name, column_name in indexes:
+            try:
+                cursor.execute(f'CREATE INDEX {idx_name} ON {table_name}({column_name})')
+            except Exception:
+                pass  # 索引已存在
         
         self.connection.commit()
+        cursor.close()
     
     # ========== 人员相关操作 ==========
     
     def get_people(self, page: int = None, page_size: int = None) -> List[Dict]:
         """获取人员列表，支持分页"""
         cursor = self.connection.cursor()
-        if page is not None and page_size is not None:
-            offset = (page - 1) * page_size
-            cursor.execute('SELECT * FROM people ORDER BY id DESC LIMIT ? OFFSET ?', (page_size, offset))
-            rows = cursor.fetchall()
-            return [self._row_to_dict(row) for row in rows]
-        else:
-            cursor.execute('SELECT * FROM people ORDER BY id DESC')
-            rows = cursor.fetchall()
-            return [self._row_to_dict(row) for row in rows]
+        try:
+            if page is not None and page_size is not None:
+                offset = (page - 1) * page_size
+                cursor.execute('SELECT * FROM people ORDER BY id DESC LIMIT %s OFFSET %s', (page_size, offset))
+                rows = cursor.fetchall()
+                return [self._row_to_dict(row) for row in rows]
+            else:
+                cursor.execute('SELECT * FROM people ORDER BY id DESC')
+                rows = cursor.fetchall()
+                return [self._row_to_dict(row) for row in rows]
+        finally:
+            cursor.close()
     
     def get_people_count(self) -> int:
         """获取人员总数"""
         cursor = self.connection.cursor()
-        cursor.execute('SELECT COUNT(*) as count FROM people')
-        row = cursor.fetchone()
-        return row['count'] if row else 0
+        try:
+            cursor.execute('SELECT COUNT(*) as count FROM people')
+            row = cursor.fetchone()
+            return row['count'] if row else 0
+        finally:
+            cursor.close()
     
     def get_person(self, person_id: int) -> Optional[Dict]:
         """获取单个人员"""
         cursor = self.connection.cursor()
-        cursor.execute('SELECT * FROM people WHERE id = ?', (person_id,))
-        row = cursor.fetchone()
-        return self._row_to_dict(row) if row else None
+        try:
+            cursor.execute('SELECT * FROM people WHERE id = %s', (person_id,))
+            row = cursor.fetchone()
+            return self._row_to_dict(row) if row else None
+        finally:
+            cursor.close()
     
     def create_person(self, data: Dict) -> Dict:
         """创建人员"""
         cursor = self.connection.cursor()
-        cursor.execute('''
-            INSERT INTO people (name, id_card, region, age, phone, status, avatar, last_update, 
-                              gender, occupation, tags, education_history, work_history, social_media,
-                              visit_records, flight_records, train_records, hometown, nationality, visa_type, institution)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            data['name'],
-            data['idCard'],
-            data.get('region', ''),  # 保留region字段用于兼容，但主要使用hometown
-            int(data['age']),
-            data['phone'],
-            data['status'],
-            data.get('avatar', ''),
-            data.get('lastUpdate', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
-            data.get('gender', ''),
-            data.get('occupation', ''),
-            json.dumps(data.get('tags', []), ensure_ascii=False) if isinstance(data.get('tags'), list) else data.get('tags', '[]'),
-            json.dumps(data.get('educationHistory', []), ensure_ascii=False) if isinstance(data.get('educationHistory'), list) else data.get('educationHistory', '[]'),
-            json.dumps(data.get('workHistory', []), ensure_ascii=False) if isinstance(data.get('workHistory'), list) else data.get('workHistory', '[]'),
-            json.dumps(data.get('socialMedia', []), ensure_ascii=False) if isinstance(data.get('socialMedia'), list) else data.get('socialMedia', '[]'),
-            json.dumps(data.get('visitRecords', []), ensure_ascii=False) if isinstance(data.get('visitRecords'), list) else data.get('visitRecords', '[]'),
-            json.dumps(data.get('flightRecords', []), ensure_ascii=False) if isinstance(data.get('flightRecords'), list) else data.get('flightRecords', '[]'),
-            json.dumps(data.get('trainRecords', []), ensure_ascii=False) if isinstance(data.get('trainRecords'), list) else data.get('trainRecords', '[]'),
-            data.get('hometown', ''),
-            data.get('nationality', ''),
-            data.get('visaType', ''),
-            data.get('institution', '')
-        ))
-        self.connection.commit()
-        return self.get_person(cursor.lastrowid)
+        try:
+            cursor.execute('''
+                INSERT INTO people (name, id_card, region, age, phone, status, avatar, last_update, 
+                                  gender, occupation, tags, education_history, work_history, social_media,
+                                  visit_records, flight_records, train_records, hometown, nationality, visa_type, institution)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (
+                data['name'],
+                data['idCard'],
+                data.get('region', ''),  # 保留region字段用于兼容，但主要使用hometown
+                int(data['age']),
+                data['phone'],
+                data['status'],
+                data.get('avatar', ''),
+                data.get('lastUpdate', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                data.get('gender', ''),
+                data.get('occupation', ''),
+                json.dumps(data.get('tags', []), ensure_ascii=False) if isinstance(data.get('tags'), list) else data.get('tags', '[]'),
+                json.dumps(data.get('educationHistory', []), ensure_ascii=False) if isinstance(data.get('educationHistory'), list) else data.get('educationHistory', '[]'),
+                json.dumps(data.get('workHistory', []), ensure_ascii=False) if isinstance(data.get('workHistory'), list) else data.get('workHistory', '[]'),
+                json.dumps(data.get('socialMedia', []), ensure_ascii=False) if isinstance(data.get('socialMedia'), list) else data.get('socialMedia', '[]'),
+                json.dumps(data.get('visitRecords', []), ensure_ascii=False) if isinstance(data.get('visitRecords'), list) else data.get('visitRecords', '[]'),
+                json.dumps(data.get('flightRecords', []), ensure_ascii=False) if isinstance(data.get('flightRecords'), list) else data.get('flightRecords', '[]'),
+                json.dumps(data.get('trainRecords', []), ensure_ascii=False) if isinstance(data.get('trainRecords'), list) else data.get('trainRecords', '[]'),
+                data.get('hometown', ''),
+                data.get('nationality', ''),
+                data.get('visaType', ''),
+                data.get('institution', '')
+            ))
+            self.connection.commit()
+            person_id = cursor.lastrowid
+            return self.get_person(person_id)
+        finally:
+            cursor.close()
     
     def batch_create_people(self, people_list: List[Dict]) -> int:
         """批量创建人员"""
@@ -641,7 +646,7 @@ class Database:
                         gender, occupation, tags, education_history, work_history, social_media,
                         visit_records, flight_records, train_records, hometown, nationality, visa_type, institution
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ''', insert_params)
                 
                 count += 1
@@ -917,7 +922,7 @@ class Database:
             # 尝试精确匹配（清理后的身份证号，使用REPLACE函数清理数据库中的值）
             cursor.execute('''
                 SELECT * FROM people 
-                WHERE TRIM(name) = ? AND REPLACE(REPLACE(REPLACE(TRIM(id_card), ' ', ''), '-', ''), '_', '') = ?
+                WHERE TRIM(name) = %s AND REPLACE(REPLACE(REPLACE(TRIM(id_card), ' ', ''), '-', ''), '_', '') = %s
                 LIMIT 1
             ''', (name, id_card_clean))
             row = cursor.fetchone()
@@ -928,7 +933,7 @@ class Database:
             # 尝试忽略大小写匹配
             cursor.execute('''
                 SELECT * FROM people 
-                WHERE LOWER(TRIM(name)) = LOWER(?) AND REPLACE(REPLACE(REPLACE(TRIM(id_card), ' ', ''), '-', ''), '_', '') = ?
+                WHERE LOWER(TRIM(name)) = LOWER(%s) AND REPLACE(REPLACE(REPLACE(TRIM(id_card), ' ', ''), '-', ''), '_', '') = %s
                 LIMIT 1
             ''', (name, id_card_clean))
             row = cursor.fetchone()
@@ -939,7 +944,7 @@ class Database:
             # 尝试直接匹配（不清理，以防数据库中也包含特殊字符）
             cursor.execute('''
                 SELECT * FROM people 
-                WHERE TRIM(name) = ? AND TRIM(id_card) = ?
+                WHERE TRIM(name) = %s AND TRIM(id_card) = %s
                 LIMIT 1
             ''', (name, id_card))
             row = cursor.fetchone()
@@ -952,7 +957,7 @@ class Database:
             # 调试：查询系统库中是否有相同姓名的人员
             cursor.execute('''
                 SELECT id, name, id_card, phone FROM people 
-                WHERE TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?)
+                WHERE TRIM(name) = %s OR LOWER(TRIM(name)) = LOWER(%s)
                 LIMIT 10
             ''', (name, name))
             debug_rows = cursor.fetchall()
@@ -965,7 +970,7 @@ class Database:
             if id_card_clean:
                 cursor.execute('''
                     SELECT id, name, id_card, phone FROM people 
-                    WHERE REPLACE(REPLACE(REPLACE(TRIM(id_card), ' ', ''), '-', ''), '_', '') = ?
+                    WHERE REPLACE(REPLACE(REPLACE(TRIM(id_card), ' ', ''), '-', ''), '_', '') = %s
                     LIMIT 10
                 ''', (id_card_clean,))
                 debug_rows = cursor.fetchall()
@@ -979,7 +984,7 @@ class Database:
             # 尝试精确匹配
             cursor.execute('''
                 SELECT * FROM people 
-                WHERE TRIM(name) = ? AND TRIM(phone) = ?
+                WHERE TRIM(name) = %s AND TRIM(phone) = %s
                 LIMIT 1
             ''', (name, phone))
             row = cursor.fetchone()
@@ -990,7 +995,7 @@ class Database:
             # 尝试忽略大小写匹配
             cursor.execute('''
                 SELECT * FROM people 
-                WHERE LOWER(TRIM(name)) = LOWER(?) AND TRIM(phone) = ?
+                WHERE LOWER(TRIM(name)) = LOWER(%s) AND TRIM(phone) = %s
                 LIMIT 1
             ''', (name, phone))
             row = cursor.fetchone()
@@ -1005,8 +1010,8 @@ class Database:
                 # 尝试多种格式：原始字符串、数字字符串、数字
                 cursor.execute('''
                     SELECT * FROM people 
-                    WHERE LOWER(TRIM(name)) = LOWER(?) 
-                    AND (TRIM(phone) = ? OR TRIM(phone) = ? OR phone = ?)
+                    WHERE LOWER(TRIM(name)) = LOWER(%s) 
+                    AND (TRIM(phone) = %s OR TRIM(phone) = %s OR phone = %s)
                     LIMIT 1
                 ''', (name, phone, phone_str, phone_num))
                 row = cursor.fetchone()
@@ -1111,7 +1116,7 @@ class Database:
             # 尝试精确匹配（清理后的身份证号，使用REPLACE函数清理数据库中的值）
             cursor.execute('''
                 SELECT * FROM local_people 
-                WHERE TRIM(name) = ? AND REPLACE(REPLACE(REPLACE(TRIM(id_card), ' ', ''), '-', ''), '_', '') = ?
+                WHERE TRIM(name) = %s AND REPLACE(REPLACE(REPLACE(TRIM(id_card), ' ', ''), '-', ''), '_', '') = %s
                 LIMIT 1
             ''', (name, id_card_clean))
             row = cursor.fetchone()
@@ -1121,7 +1126,7 @@ class Database:
             # 尝试忽略大小写匹配
             cursor.execute('''
                 SELECT * FROM local_people 
-                WHERE LOWER(TRIM(name)) = LOWER(?) AND REPLACE(REPLACE(REPLACE(TRIM(id_card), ' ', ''), '-', ''), '_', '') = ?
+                WHERE LOWER(TRIM(name)) = LOWER(%s) AND REPLACE(REPLACE(REPLACE(TRIM(id_card), ' ', ''), '-', ''), '_', '') = %s
                 LIMIT 1
             ''', (name, id_card_clean))
             row = cursor.fetchone()
@@ -1131,7 +1136,7 @@ class Database:
             # 尝试直接匹配（不清理，以防数据库中也包含特殊字符）
             cursor.execute('''
                 SELECT * FROM local_people 
-                WHERE TRIM(name) = ? AND TRIM(id_card) = ?
+                WHERE TRIM(name) = %s AND TRIM(id_card) = %s
                 LIMIT 1
             ''', (name, id_card))
             row = cursor.fetchone()
@@ -1143,7 +1148,7 @@ class Database:
             # 尝试精确匹配
             cursor.execute('''
                 SELECT * FROM local_people 
-                WHERE TRIM(name) = ? AND TRIM(phone) = ?
+                WHERE TRIM(name) = %s AND TRIM(phone) = %s
                 LIMIT 1
             ''', (name, phone))
             row = cursor.fetchone()
@@ -1153,7 +1158,7 @@ class Database:
             # 尝试忽略大小写匹配
             cursor.execute('''
                 SELECT * FROM local_people 
-                WHERE LOWER(TRIM(name)) = LOWER(?) AND TRIM(phone) = ?
+                WHERE LOWER(TRIM(name)) = LOWER(%s) AND TRIM(phone) = %s
                 LIMIT 1
             ''', (name, phone))
             row = cursor.fetchone()
@@ -1165,7 +1170,7 @@ class Database:
                 phone_numeric = str(int(float(phone)))
                 cursor.execute('''
                     SELECT * FROM local_people 
-                    WHERE TRIM(name) = ? AND (TRIM(phone) = ? OR TRIM(phone) = ?)
+                    WHERE TRIM(name) = %s AND (TRIM(phone) = %s OR TRIM(phone) = %s)
                     LIMIT 1
                 ''', (name, phone, phone_numeric))
                 row = cursor.fetchone()
@@ -1179,7 +1184,7 @@ class Database:
     def get_local_person(self, person_id: int) -> Optional[Dict]:
         """获取单个本地人员，同时查找匹配的系统库人员"""
         cursor = self.connection.cursor()
-        cursor.execute('SELECT * FROM local_people WHERE id = ?', (person_id,))
+        cursor.execute('SELECT * FROM local_people WHERE id = %s', (person_id,))
         row = cursor.fetchone()
         if not row:
             return None
@@ -1268,7 +1273,7 @@ class Database:
             return 0
         
         cursor = self.connection.cursor()
-        placeholders = ','.join(['?'] * len(person_ids))
+        placeholders = ','.join(['%s'] * len(person_ids))
         cursor.execute(f'DELETE FROM local_people WHERE id IN ({placeholders})', person_ids)
         self.connection.commit()
         return cursor.rowcount
@@ -1286,10 +1291,10 @@ class Database:
         cursor = self.connection.cursor()
         cursor.execute('''
             UPDATE people 
-            SET name = ?, id_card = ?, region = ?, age = ?, phone = ?, status = ?, last_update = ?,
-                gender = ?, occupation = ?, tags = ?, education_history = ?, work_history = ?, social_media = ?,
-                visit_records = ?, flight_records = ?, train_records = ?, hometown = ?, nationality = ?, visa_type = ?, institution = ?
-            WHERE id = ?
+            SET name = %s, id_card = %s, region = %s, age = %s, phone = %s, status = %s, last_update = %s,
+                gender = %s, occupation = %s, tags = %s, education_history = %s, work_history = %s, social_media = %s,
+                visit_records = %s, flight_records = %s, train_records = %s, hometown = %s, nationality = %s, visa_type = %s, institution = %s
+            WHERE id = %s
         ''', (
             data.get('name'),
             data.get('idCard'),
@@ -1319,9 +1324,12 @@ class Database:
     def delete_person(self, person_id: int) -> bool:
         """删除人员"""
         cursor = self.connection.cursor()
-        cursor.execute('DELETE FROM people WHERE id = ?', (person_id,))
-        self.connection.commit()
-        return cursor.rowcount > 0
+        try:
+            cursor.execute('DELETE FROM people WHERE id = %s', (person_id,))
+            self.connection.commit()
+            return cursor.rowcount > 0
+        finally:
+            cursor.close()
     
     def count_people_by_status(self) -> Dict[str, int]:
         """按状态统计人员数量"""
@@ -1343,10 +1351,10 @@ class Database:
         if filters:
             conditions = []
             if 'person_id' in filters:
-                conditions.append('person_id = ?')
+                conditions.append('person_id = %s')
                 params.append(filters['person_id'])
             if 'from_date' in filters:
-                conditions.append('movement_time >= ?')
+                conditions.append('movement_time >= %s')
                 params.append(filters['from_date'])
             if conditions:
                 query += ' WHERE ' + ' AND '.join(conditions)
@@ -1366,7 +1374,7 @@ class Database:
         cursor = self.connection.cursor()
         cursor.execute('''
             INSERT INTO movements (person_id, person_name, avatar, from_region, to_region, movement_time, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         ''', (
             data.get('personId'),
             data.get('name', ''),
@@ -1377,7 +1385,7 @@ class Database:
             data.get('status')
         ))
         self.connection.commit()
-        cursor.execute('SELECT * FROM movements WHERE id = ?', (cursor.lastrowid,))
+        cursor.execute('SELECT * FROM movements WHERE id = %s', (cursor.lastrowid,))
         row = cursor.fetchone()
         return self._row_to_dict(row) if row else {}
     
@@ -1394,20 +1402,24 @@ class Database:
         """更新地图数据"""
         cursor = self.connection.cursor()
         cursor.execute('''
-            INSERT OR REPLACE INTO map_data (province_name, value, updated_at)
-            VALUES (?, ?, ?)
+            INSERT INTO map_data (province_name, value, updated_at)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)
         ''', (province_name, value, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         self.connection.commit()
+        cursor.close()
     
     def batch_update_map_data(self, data: List[Dict]):
         """批量更新地图数据"""
         cursor = self.connection.cursor()
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         cursor.executemany('''
-            INSERT OR REPLACE INTO map_data (province_name, value, updated_at)
-            VALUES (?, ?, ?)
+            INSERT INTO map_data (province_name, value, updated_at)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)
         ''', [(item['name'], item['value'], now) for item in data])
         self.connection.commit()
+        cursor.close()
     
     # ========== 趋势数据相关操作 ==========
     
@@ -1420,10 +1432,10 @@ class Database:
         if start_date or end_date:
             conditions = []
             if start_date:
-                conditions.append('date >= ?')
+                conditions.append('date >= %s')
                 params.append(start_date)
             if end_date:
-                conditions.append('date <= ?')
+                conditions.append('date <= %s')
                 params.append(end_date)
             if conditions:
                 query += ' WHERE ' + ' AND '.join(conditions)
@@ -1445,18 +1457,21 @@ class Database:
         """创建或更新趋势数据"""
         cursor = self.connection.cursor()
         cursor.execute('''
-            INSERT OR REPLACE INTO trend_data (date, confirmed_count, suspected_count, recovered_count, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO trend_data (date, confirmed_count, suspected_count, recovered_count, created_at)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE confirmed_count = VALUES(confirmed_count), suspected_count = VALUES(suspected_count), recovered_count = VALUES(recovered_count)
         ''', (date, confirmed_count, suspected_count, recovered_count, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         self.connection.commit()
+        cursor.close()
     
     def batch_create_trend_data(self, data: List[Dict]):
         """批量创建趋势数据"""
         cursor = self.connection.cursor()
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         cursor.executemany('''
-            INSERT OR REPLACE INTO trend_data (date, confirmed_count, suspected_count, recovered_count, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO trend_data (date, confirmed_count, suspected_count, recovered_count, created_at)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE confirmed_count = VALUES(confirmed_count), suspected_count = VALUES(suspected_count), recovered_count = VALUES(recovered_count)
         ''', [
             (
                 item['date'],
@@ -1468,6 +1483,7 @@ class Database:
             for item in data
         ])
         self.connection.commit()
+        cursor.close()
     
     # ========== 流动统计相关操作 ==========
     
@@ -1476,7 +1492,7 @@ class Database:
         cursor = self.connection.cursor()
         cursor.execute('''
             SELECT region, flow_count FROM flow_statistics 
-            WHERE period = ? 
+            WHERE period = %s 
             ORDER BY flow_count DESC
         ''', (period,))
         rows = cursor.fetchall()
@@ -1492,18 +1508,21 @@ class Database:
         """创建或更新流动统计"""
         cursor = self.connection.cursor()
         cursor.execute('''
-            INSERT OR REPLACE INTO flow_statistics (region, flow_count, period, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO flow_statistics (region, flow_count, period, updated_at)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE flow_count = VALUES(flow_count), updated_at = VALUES(updated_at)
         ''', (region, flow_count, period, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         self.connection.commit()
+        cursor.close()
     
     def batch_create_flow_statistics(self, data: List[Dict], period: str = 'week'):
         """批量创建流动统计"""
         cursor = self.connection.cursor()
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         cursor.executemany('''
-            INSERT OR REPLACE INTO flow_statistics (region, flow_count, period, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO flow_statistics (region, flow_count, period, updated_at)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE flow_count = VALUES(flow_count), updated_at = VALUES(updated_at)
         ''', [
             (
                 item['region'],
@@ -1514,6 +1533,7 @@ class Database:
             for item in data
         ])
         self.connection.commit()
+        cursor.close()
     
     # ========== 重点人员相关操作 ==========
     
@@ -1526,7 +1546,7 @@ class Database:
                        p.avatar, p.gender, p.occupation, p.hometown
                 FROM key_persons kp
                 JOIN people p ON kp.person_id = p.id
-                WHERE kp.category = ?
+                WHERE kp.category = %s
                 ORDER BY kp.priority_level DESC, kp.added_at DESC
             ''', (category,))
         else:
@@ -1596,7 +1616,7 @@ class Database:
             SELECT kp.*, p.name, p.id_card, p.phone
             FROM key_persons kp
             JOIN people p ON kp.person_id = p.id
-            WHERE kp.person_id = ?
+            WHERE kp.person_id = %s
             LIMIT 1
         ''', (person_id,))
         row = cursor.fetchone()
@@ -1626,16 +1646,18 @@ class Database:
         """添加重点人员"""
         cursor = self.connection.cursor()
         cursor.execute('''
-            INSERT OR REPLACE INTO key_persons (person_id, category, priority_level, reason, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO key_persons (person_id, category, priority_level, reason, updated_at)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE priority_level = VALUES(priority_level), reason = VALUES(reason), updated_at = VALUES(updated_at)
         ''', (person_id, category, priority_level, reason, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         self.connection.commit()
+        cursor.close()
         return self.get_key_persons(category)[0] if self.get_key_persons(category) else {}
     
     def remove_key_person(self, person_id: int, category: str) -> bool:
         """移除重点人员"""
         cursor = self.connection.cursor()
-        cursor.execute('DELETE FROM key_persons WHERE person_id = ? AND category = ?', (person_id, category))
+        cursor.execute('DELETE FROM key_persons WHERE person_id = %s AND category = %s', (person_id, category))
         self.connection.commit()
         return cursor.rowcount > 0
     
@@ -1646,22 +1668,22 @@ class Database:
         params = []
         
         if priority_level is not None:
-            updates.append('priority_level = ?')
+            updates.append('priority_level = %s')
             params.append(priority_level)
         
         if reason is not None:
-            updates.append('reason = ?')
+            updates.append('reason = %s')
             params.append(reason)
         
         if updates:
-            updates.append('updated_at = ?')
+            updates.append('updated_at = %s')
             params.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             params.extend([person_id, category])
             
             cursor.execute(f'''
                 UPDATE key_persons 
                 SET {', '.join(updates)}
-                WHERE person_id = ? AND category = ?
+                WHERE person_id = %s AND category = %s
             ''', params)
             self.connection.commit()
         
@@ -1682,7 +1704,7 @@ class Database:
         total_people = cursor.fetchone()['count']
         
         # 确诊人数
-        cursor.execute('SELECT COUNT(*) as count FROM people WHERE status = ?', ('确诊',))
+        cursor.execute('SELECT COUNT(*) as count FROM people WHERE status = %s', ('确诊',))
         confirmed_cases = cursor.fetchone()['count']
         
         # 活跃区域数
@@ -1693,7 +1715,7 @@ class Database:
         today = datetime.now().strftime('%Y-%m-%d')
         today_start = today + ' 00:00:00'
         today_end = today + ' 23:59:59'
-        cursor.execute('SELECT COUNT(*) as count FROM movements WHERE movement_time >= ? AND movement_time <= ?', (today_start, today_end))
+        cursor.execute('SELECT COUNT(*) as count FROM movements WHERE movement_time >= %s AND movement_time <= %s', (today_start, today_end))
         today_movements = cursor.fetchone()['count']
         
         return {
@@ -1711,7 +1733,7 @@ class Database:
         cursor.execute('''
             SELECT id, hometown, region, last_update, status
             FROM people
-            WHERE status = ?
+            WHERE status = %s
         ''', ('确诊',))
         
         confirmed_people = cursor.fetchall()
@@ -1773,81 +1795,92 @@ class Database:
         if not row:
             return {}
         
-        result = {}
-        for key in row.keys():
-            value = row[key]
+        # pymysql 使用 DictCursor，row 已经是字典
+        if isinstance(row, dict):
+            result = row.copy()
+        else:
+            result = {}
+            for key in row.keys():
+                result[key] = row[key]
+        
+        # 创建新的结果字典用于字段名转换
+        converted_result = {}
+        for key, value in result.items():
             # 转换字段名（下划线转驼峰）
             if key == 'id_card':
-                result['idCard'] = value
+                converted_result['idCard'] = value
             elif key == 'last_update':
-                result['lastUpdate'] = value
+                converted_result['lastUpdate'] = value
             elif key == 'created_at':
-                result['createdAt'] = value
+                converted_result['createdAt'] = value
             elif key == 'person_id':
-                result['personId'] = value
+                converted_result['personId'] = value
             elif key == 'person_name':
-                result['name'] = value
+                converted_result['name'] = value
             elif key == 'from_region':
-                result['from'] = value
+                converted_result['from'] = value
             elif key == 'to_region':
-                result['to'] = value
+                converted_result['to'] = value
             elif key == 'movement_time':
-                result['time'] = value
+                converted_result['time'] = value
             elif key == 'education_history':
                 # 解析JSON字符串
                 try:
-                    result['educationHistory'] = json.loads(value) if value else []
+                    converted_result['educationHistory'] = json.loads(value) if value else []
                 except (json.JSONDecodeError, TypeError):
-                    result['educationHistory'] = []
+                    converted_result['educationHistory'] = []
             elif key == 'work_history':
                 try:
-                    result['workHistory'] = json.loads(value) if value else []
+                    converted_result['workHistory'] = json.loads(value) if value else []
                 except (json.JSONDecodeError, TypeError):
-                    result['workHistory'] = []
+                    converted_result['workHistory'] = []
             elif key == 'social_media':
                 try:
-                    result['socialMedia'] = json.loads(value) if value else []
+                    converted_result['socialMedia'] = json.loads(value) if value else []
                 except (json.JSONDecodeError, TypeError):
-                    result['socialMedia'] = []
+                    converted_result['socialMedia'] = []
             elif key == 'visit_records':
                 try:
-                    result['visitRecords'] = json.loads(value) if value else []
+                    converted_result['visitRecords'] = json.loads(value) if value else []
                 except (json.JSONDecodeError, TypeError):
-                    result['visitRecords'] = []
+                    converted_result['visitRecords'] = []
             elif key == 'flight_records':
                 try:
-                    result['flightRecords'] = json.loads(value) if value else []
+                    converted_result['flightRecords'] = json.loads(value) if value else []
                 except (json.JSONDecodeError, TypeError):
-                    result['flightRecords'] = []
+                    converted_result['flightRecords'] = []
             elif key == 'train_records':
                 try:
-                    result['trainRecords'] = json.loads(value) if value else []
+                    converted_result['trainRecords'] = json.loads(value) if value else []
                 except (json.JSONDecodeError, TypeError):
-                    result['trainRecords'] = []
+                    converted_result['trainRecords'] = []
             elif key == 'tags':
                 try:
-                    result['tags'] = json.loads(value) if value else []
+                    converted_result['tags'] = json.loads(value) if value else []
                 except (json.JSONDecodeError, TypeError):
-                    result['tags'] = []
+                    converted_result['tags'] = []
             elif key == 'hometown':
-                result['hometown'] = value
+                converted_result['hometown'] = value
             elif key == 'nationality':
-                result['nationality'] = value
+                converted_result['nationality'] = value
             elif key == 'visa_type':
-                result['visaType'] = value
+                converted_result['visaType'] = value
             elif key == 'institution':
-                result['institution'] = value
+                converted_result['institution'] = value
             else:
-                result[key] = value
-        return result
+                converted_result[key] = value
+        return converted_result
     
     def clear_all_data(self):
         """清空所有数据（用于重新初始化）"""
         cursor = self.connection.cursor()
-        cursor.execute('DELETE FROM movements')
-        cursor.execute('DELETE FROM people')
-        cursor.execute('DELETE FROM map_data')
-        self.connection.commit()
+        try:
+            cursor.execute('DELETE FROM movements')
+            cursor.execute('DELETE FROM people')
+            cursor.execute('DELETE FROM map_data')
+            self.connection.commit()
+        finally:
+            cursor.close()
     
     def __enter__(self):
         """上下文管理器入口"""

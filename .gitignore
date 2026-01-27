@@ -91,3 +91,5 @@ instance/
 .pytest_cache/
 .tox/
 .hypothesis/
+
+data
