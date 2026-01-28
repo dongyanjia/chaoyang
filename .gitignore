@@ -91,3 +91,7 @@ instance/
 .pytest_cache/
 .tox/
 .hypothesis/
+
+docker-compose/seaweedfs
+
+docker-compose/onlyoffice
