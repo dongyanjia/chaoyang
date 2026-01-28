@@ -12,8 +12,8 @@ services:
       - FE_SERVERS=fe1:172.20.81.2:9010
       - FE_ID=1
     volumes:
-      - /data/dockerData/doris/fe/doris-meta:/opt/apache-doris/fe/doris-meta
-      - /data/dockerData/doris/fe/log:/opt/apache-doris/fe/log
+      - ./data/dockerData/doris/fe/doris-meta:/opt/apache-doris/fe/doris-meta
+      - ./data/dockerData/doris/fe/log:/opt/apache-doris/fe/log
 
   be:
     image: apache/doris:be-4.0.2
@@ -27,8 +27,8 @@ services:
       - FE_SERVERS=fe1:172.20.81.2:9010
       - BE_ADDR=172.20.81.3:9050
     volumes:
-      - /data/dockerData/doris/be/storage:/opt/apache-doris/be/storage
-      - /data/dockerData/doris/be/log:/opt/apache-doris/be/log
+      - ./data/dockerData/doris/be/storage:/opt/apache-doris/be/storage
+      - ./data/dockerData/doris/be/log:/opt/apache-doris/be/log
     depends_on:
       - fe
 

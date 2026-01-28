@@ -248,15 +248,37 @@ class TagService:
             
             # 检查表是否存在，如果不存在则返回空列表
             try:
-                cursor.execute(f'''
+                # 先检查表是否存在
+                cursor.execute("SHOW TABLES LIKE 'tags'")
+                table_exists = cursor.fetchone()
+                if not table_exists:
+                    print('[WARN] tags表不存在，返回空列表')
+                    return []
+                
+                # 查询标签数据
+                query = f'''
                     SELECT category_name, sub_category_name, tag_name,
                            category_order, sub_category_order, tag_order,
                            category_id, sub_category_id, tag_id
                     FROM tags
                     {where_clause}
                     ORDER BY category_order, sub_category_order, tag_order
-                ''')
+                '''
+                cursor.execute(query)
                 rows = cursor.fetchall()
+                
+                # 添加调试信息
+                print(f'[DEBUG] get_all_tags: 查询到 {len(rows)} 条标签记录')
+                if len(rows) == 0:
+                    # 检查是否有任何标签数据（包括禁用的）
+                    cursor.execute('SELECT COUNT(*) as total FROM tags')
+                    total_count = cursor.fetchone()['total']
+                    print(f'[DEBUG] get_all_tags: tags表中总共有 {total_count} 条记录（包括禁用的）')
+                    if total_count > 0:
+                        # 检查是否有禁用的标签
+                        cursor.execute('SELECT COUNT(*) as inactive FROM tags WHERE is_active = 0')
+                        inactive_count = cursor.fetchone()['inactive']
+                        print(f'[DEBUG] get_all_tags: 其中 {inactive_count} 条记录被标记为禁用')
             except pymysql.err.ProgrammingError as e:
                 # 表不存在或其他SQL错误
                 if 'doesn\'t exist' in str(e) or 'does not exist' in str(e):

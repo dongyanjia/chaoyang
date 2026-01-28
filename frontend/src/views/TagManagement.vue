@@ -426,7 +426,7 @@
 
 <script>
 import { ref, onMounted } from 'vue'
-import { getTagCategories, saveTagCategories, DEFAULT_TAG_CATEGORIES } from '../config/tagManagement'
+import { getTagCategories, saveTagCategories } from '../config/tagManagement'
 
 export default {
   name: 'TagManagement',
@@ -524,14 +524,16 @@ export default {
     }
 
     // 创建默认版本
-    const createDefaultVersion = () => {
+    const createDefaultVersion = (defaultData = null) => {
+      // 如果没有提供数据，使用 DEFAULT_TAG_CATEGORIES（用于初始化场景）
+      const dataToUse = defaultData
       const defaultVersion = {
         id: DEFAULT_VERSION_ID,
         name: '默认版本',
         isDefault: true,
-        data: JSON.parse(JSON.stringify(DEFAULT_TAG_CATEGORIES)),
+        data: JSON.parse(JSON.stringify(dataToUse)),
         createdAt: new Date().toISOString(),
-        log: `标签架构：\n${generateStructureDescription(DEFAULT_TAG_CATEGORIES)}`
+        log: `标签架构：\n${generateStructureDescription(dataToUse)}`
       }
       tagVersions.value = [defaultVersion]
       saveVersions()
@@ -835,7 +837,6 @@ export default {
         const api = (await import('../api')).default
         
         // 优先从数据库加载
-        try {
           const response = await api.getTags()
           if (response.data && Array.isArray(response.data) && response.data.length > 0) {
             tagCategories.value = response.data
@@ -848,16 +849,6 @@ export default {
             loading.value = false
             return
           }
-        } catch (error) {
-          console.warn('[标签] 从数据库读取失败:', error)
-          // 如果强制从数据库加载但失败，直接返回错误
-          if (forceFromDatabase) {
-            dataSource.value = '加载失败'
-            dataSourceTooltip.value = '从数据库加载失败: ' + (error.message || error)
-            loading.value = false
-            return
-          }
-        }
         
         // 从localStorage读取（仅在非强制数据库加载时）
         if (!forceFromDatabase) {
@@ -876,17 +867,26 @@ export default {
           }
         }
         
-        // 使用默认数据
-        tagCategories.value = DEFAULT_TAG_CATEGORIES
-        previousVersionData.value = JSON.parse(JSON.stringify(DEFAULT_TAG_CATEGORIES))
+        // 使用默认数据（通过 getTagCategories 获取，它会自动处理回退逻辑）
+        const defaultCategories = await getTagCategories()
+        tagCategories.value = defaultCategories
+        previousVersionData.value = JSON.parse(JSON.stringify(defaultCategories))
         hasUnsavedChanges.value = false
         dataSource.value = '默认数据'
         dataSourceTooltip.value = '使用系统默认标签配置'
       } catch (error) {
         console.error('加载标签数据失败:', error)
-        // 如果加载失败，使用默认数据
-        tagCategories.value = DEFAULT_TAG_CATEGORIES
-        previousVersionData.value = JSON.parse(JSON.stringify(DEFAULT_TAG_CATEGORIES))
+        // 如果加载失败，使用默认数据（通过 getTagCategories 获取）
+        try {
+          const defaultCategories = await getTagCategories()
+          tagCategories.value = defaultCategories
+          previousVersionData.value = JSON.parse(JSON.stringify(defaultCategories))
+        } catch (fallbackError) {
+          // 如果连 getTagCategories 都失败，才使用直接导入的 DEFAULT_TAG_CATEGORIES
+          console.error('getTagCategories 也失败，使用直接导入的默认数据:', fallbackError)
+          tagCategories.value = DEFAULT_TAG_CATEGORIES
+          previousVersionData.value = JSON.parse(JSON.stringify(DEFAULT_TAG_CATEGORIES))
+        }
         hasUnsavedChanges.value = false
         dataSource.value = '默认数据'
         dataSourceTooltip.value = '加载失败，使用默认配置'
@@ -1254,7 +1254,7 @@ export default {
     }
 
     // 重置为默认数据
-    const resetToDefault = () => {
+    const resetToDefault = async () => {
       // 如果有当前版本，恢复到当前版本；否则恢复到默认版本
       if (currentVersionId.value) {
         const version = tagVersions.value.find(v => v.id === currentVersionId.value)
@@ -1295,11 +1295,13 @@ export default {
       } else {
         // 如果没有默认版本，创建并恢复
         if (confirm('确定要重置为默认标签数据吗？这将覆盖当前所有标签设置。')) {
-          tagCategories.value = JSON.parse(JSON.stringify(DEFAULT_TAG_CATEGORIES))
-          createDefaultVersion()
+          // 通过 getTagCategories 获取默认数据（会优先从数据库获取）
+          const defaultCategories = await getTagCategories()
+          tagCategories.value = JSON.parse(JSON.stringify(defaultCategories))
+          createDefaultVersion(defaultCategories)
           currentVersionId.value = DEFAULT_VERSION_ID
           hasUnsavedChanges.value = false
-          previousVersionData.value = JSON.parse(JSON.stringify(DEFAULT_TAG_CATEGORIES))
+          previousVersionData.value = JSON.parse(JSON.stringify(defaultCategories))
           saveVersions()
           saveTagCategories(tagCategories.value).then(result => {
             if (result && result.message) {
