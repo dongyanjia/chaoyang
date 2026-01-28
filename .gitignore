@@ -91,4 +91,11 @@ instance/
 .pytest_cache/
 .tox/
 .hypothesis/
+<<<<<<< HEAD
 docker-compose/data/
+=======
+
+docker-compose/seaweedfs
+
+docker-compose/onlyoffice
+>>>>>>> e18f807c688888103a7d2ed89e7fa018c26fde52
