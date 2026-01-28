@@ -18,6 +18,7 @@ import PersonDetail from '../views/PersonDetail.vue'
 import LocalPersonDetail from '../views/LocalPersonDetail.vue'
 import KeyPersons from '../views/KeyPersons.vue'
 import Workspace from '../views/Workspace.vue'
+import DocumentWorkspace from '../views/DocumentWorkspace.vue'
 import ProvinceMap from '../views/ProvinceMap.vue'
 import Login from '../views/Login.vue'
 import TagManagement from '../views/TagManagement.vue'
@@ -69,6 +70,12 @@ const routes = [
     path: '/workspace',
     name: 'Workspace',
     component: Workspace,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/document-workspace',
+    name: 'DocumentWorkspace',
+    component: DocumentWorkspace,
     meta: { requiresAuth: true }
   },
   {

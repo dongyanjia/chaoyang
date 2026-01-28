@@ -1,0 +1,26 @@
+# 开发环境配置
+# 使用方式: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  backend:
+    volumes:
+      # 开发模式下挂载源代码，支持热重载
+      - ./backend:/app
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+    command: ["python", "run.py"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev  # 使用开发阶段
+    volumes:
+      # 开发模式下挂载源代码
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"  # 开发服务器端口
+    environment:
+      - NODE_ENV=development

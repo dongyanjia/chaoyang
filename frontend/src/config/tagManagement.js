@@ -99,30 +99,68 @@ export const DEFAULT_TAG_CATEGORIES = [
 
 /**
  * 获取标签分类数据
- * 优先从localStorage读取，如果没有则返回默认数据
+ * 优先从数据库读取，其次从localStorage读取，最后返回默认数据
  */
-export function getTagCategories() {
+export async function getTagCategories() {
   try {
+    // 尝试从数据库读取
+    const api = (await import('../api')).default
+    try {
+      const response = await api.getTags()
+      if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+        console.log('[标签] 从数据库读取标签数据')
+        // 保存到localStorage作为缓存
+        localStorage.setItem(TAG_STORAGE_KEY, JSON.stringify(response.data))
+        return response.data
+      }
+    } catch (error) {
+      console.warn('[标签] 从数据库读取失败，使用本地缓存:', error)
+    }
+    
+    // 从localStorage读取
     const stored = localStorage.getItem(TAG_STORAGE_KEY)
     if (stored) {
-      return JSON.parse(stored)
+      const parsed = JSON.parse(stored)
+      if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+        console.log('[标签] 从localStorage读取标签数据')
+        return parsed
+      }
     }
   } catch (error) {
     console.error('读取标签数据失败:', error)
   }
+  
+  console.log('[标签] 使用默认标签数据')
   return DEFAULT_TAG_CATEGORIES
 }
 
 /**
- * 保存标签分类数据到localStorage
+ * 保存标签分类数据
+ * 同时保存到localStorage和数据库
  */
-export function saveTagCategories(categories) {
+export async function saveTagCategories(categories) {
   try {
+    // 保存到localStorage
     localStorage.setItem(TAG_STORAGE_KEY, JSON.stringify(categories))
-    return true
+    
+    // 同步到数据库
+    try {
+      const api = (await import('../api')).default
+      const response = await api.syncTags(categories)
+      if (response.data && response.data.success) {
+        console.log('[标签] 已同步到数据库:', response.data.message)
+        return { success: true, message: '已保存到本地和数据库' }
+      } else {
+        console.warn('[标签] 数据库同步失败:', response.data?.message)
+        return { success: true, message: '已保存到本地，但数据库同步失败' }
+      }
+    } catch (error) {
+      console.warn('[标签] 数据库同步失败:', error)
+      return { success: true, message: '已保存到本地，但数据库同步失败' }
+    }
   } catch (error) {
     console.error('保存标签数据失败:', error)
-    return false
+    return { success: false, message: '保存失败' }
   }
 }
 

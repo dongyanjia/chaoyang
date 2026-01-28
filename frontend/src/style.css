@@ -5,15 +5,21 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1419 100%);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: #0a0a0f;
+  background-image: 
+    radial-gradient(circle at 20% 30%, rgba(102, 126, 234, 0.15) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(118, 75, 162, 0.15) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.1) 0%, transparent 70%);
   color: #e0e0e0;
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
+  font-weight: 400;
+  letter-spacing: 0.01em;
 }
 
-/* 全局科技感背景效果 */
+/* 增强的网格背景效果 */
 body::before {
   content: '';
   position: fixed;
@@ -22,11 +28,13 @@ body::before {
   width: 100%;
   height: 100%;
   background-image: 
-    linear-gradient(rgba(102, 126, 234, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(102, 126, 234, 0.05) 1px, transparent 1px);
-  background-size: 50px 50px;
-  animation: gridMove 20s linear infinite;
-  opacity: 0.3;
+    linear-gradient(rgba(102, 126, 234, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(102, 126, 234, 0.08) 1px, transparent 1px),
+    linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px);
+  background-size: 50px 50px, 50px 50px, 10px 10px, 10px 10px;
+  animation: gridMove 25s linear infinite, gridPulse 8s ease-in-out infinite;
+  opacity: 0.4;
   z-index: 0;
   pointer-events: none;
 }
@@ -40,7 +48,16 @@ body::before {
   }
 }
 
-/* 全局粒子效果 */
+@keyframes gridPulse {
+  0%, 100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* 增强的粒子光效 */
 body::after {
   content: '';
   position: fixed;
@@ -48,20 +65,47 @@ body::after {
   left: 0;
   width: 100%;
   height: 100%;
-  background: radial-gradient(circle at 20% 50%, rgba(102, 126, 234, 0.1) 0%, transparent 50%),
-              radial-gradient(circle at 80% 80%, rgba(118, 75, 162, 0.1) 0%, transparent 50%);
+  background: 
+    radial-gradient(circle at 15% 25%, rgba(102, 126, 234, 0.12) 0%, transparent 40%),
+    radial-gradient(circle at 85% 75%, rgba(118, 75, 162, 0.12) 0%, transparent 40%),
+    radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.08) 0%, transparent 60%),
+    radial-gradient(circle at 30% 80%, rgba(139, 92, 246, 0.1) 0%, transparent 35%);
   z-index: 0;
   pointer-events: none;
-  animation: pulse 10s ease-in-out infinite;
+  animation: particlePulse 12s ease-in-out infinite, particleMove 20s ease-in-out infinite;
 }
 
-@keyframes pulse {
+@keyframes particlePulse {
   0%, 100% {
-    opacity: 0.5;
+    opacity: 0.6;
+    transform: scale(1);
   }
   50% {
-    opacity: 0.8;
+    opacity: 0.9;
+    transform: scale(1.05);
   }
+}
+
+@keyframes particleMove {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  33% {
+    transform: translate(2%, 1%) rotate(120deg);
+  }
+  66% {
+    transform: translate(-1%, 2%) rotate(240deg);
+  }
+  100% {
+    transform: translate(0, 0) rotate(360deg);
+  }
+}
+
+/* 扫描线效果 - 增强body::before的阴影 */
+body::before {
+  box-shadow: 
+    inset 0 0 200px rgba(102, 126, 234, 0.05),
+    inset 0 0 100px rgba(59, 130, 246, 0.03);
 }
 
 #app {
@@ -70,23 +114,124 @@ body::after {
   z-index: 1;
 }
 
-/* 全局滚动条样式 */
+/* 增强的滚动条样式 - 科技感 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 20, 30, 0.5);
-  border-radius: 4px;
+  background: rgba(15, 20, 30, 0.6);
+  border-radius: 5px;
+  border: 1px solid rgba(102, 126, 234, 0.1);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 4px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #3b82f6 100%);
+  border-radius: 5px;
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  box-shadow: 
+    inset 0 0 6px rgba(102, 126, 234, 0.5),
+    0 0 10px rgba(102, 126, 234, 0.3);
+  transition: all 0.3s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 50%, #8b5cf6 100%);
+  box-shadow: 
+    inset 0 0 8px rgba(102, 126, 234, 0.7),
+    0 0 15px rgba(102, 126, 234, 0.5);
+  transform: scale(1.1);
+}
+
+/* 全局文字选择样式 */
+::selection {
+  background: rgba(102, 126, 234, 0.3);
+  color: #fff;
+}
+
+::-moz-selection {
+  background: rgba(102, 126, 234, 0.3);
+  color: #fff;
+}
+
+/* 全局链接样式 */
+a {
+  color: #667eea;
+  text-decoration: none;
+  transition: all 0.3s ease;
+}
+
+a:hover {
+  color: #764ba2;
+  text-shadow: 0 0 8px rgba(102, 126, 234, 0.5);
+}
+
+/* 全局按钮基础样式 */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+/* 全局输入框基础样式 */
+input, textarea, select {
+  font-family: inherit;
+  transition: all 0.3s ease;
+}
+
+/* 全局卡片基础样式 */
+.card-base {
+  background: rgba(15, 20, 30, 0.7);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 12px;
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* 全局动画类 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(102, 126, 234, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(102, 126, 234, 0.7), 0 0 40px rgba(102, 126, 234, 0.4);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.6s ease-out;
+}
+
+.animate-slideIn {
+  animation: slideIn 0.6s ease-out;
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
 }
 

@@ -13,7 +13,7 @@ Flask应用主文件
 作者：系统开发团队
 版本：1.0.0
 """
-from flask import Flask, jsonify, request, send_from_directory, g
+from flask import Flask, jsonify, request, send_from_directory, send_file, g
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -25,109 +25,53 @@ import hashlib
 import secrets
 from database import Database
 from map_sync import sync_map_data_from_people, sync_people_from_map_data, get_province_from_region
+import pymysql
+try:
+    from document_service import get_document_service
+    from rag_service import get_rag_service
+    DOCUMENT_SERVICE_AVAILABLE = True
+except ImportError as e:
+    print(f'[WARN] 文档服务模块未安装: {e}')
+    DOCUMENT_SERVICE_AVAILABLE = False
+
+try:
+    from tag_service import get_tag_service
+    TAG_SERVICE_AVAILABLE = True
+    print('[OK] 标签服务模块加载成功')
+except ImportError as e:
+    print(f'[WARN] 标签服务模块未安装: {e}')
+    import traceback
+    traceback.print_exc()
+    TAG_SERVICE_AVAILABLE = False
+except Exception as e:
+    print(f'[ERROR] 标签服务模块加载失败: {e}')
+    import traceback
+    traceback.print_exc()
+    TAG_SERVICE_AVAILABLE = False
 
 # pandas导入（用于Excel/CSV文件解析）
 PANDAS_AVAILABLE = False
 pd = None
-# #region agent log
-import json
-import os
-import sys
-log_path = r'f:\all\projects\chaoyangV1.0.1\.cursor\debug.log'
-try:
-    with open(log_path, 'a', encoding='utf-8') as f:
-        f.write(json.dumps({
-            'id': f'log_{int(__import__("time").time() * 1000)}',
-            'timestamp': int(__import__("time").time() * 1000),
-            'location': 'app.py:29',
-            'message': '开始导入pandas',
-            'data': {'python_executable': sys.executable, 'python_version': sys.version},
-            'sessionId': 'debug-session',
-            'runId': 'run1',
-            'hypothesisId': 'A'
-        }, ensure_ascii=False) + '\n')
-except: pass
-# #endregion
 try:
     import pandas as pd
     PANDAS_AVAILABLE = True
     print(f"[OK] pandas导入成功，版本: {pd.__version__}")
-    # #region agent log
-    try:
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({
-                'id': f'log_{int(__import__("time").time() * 1000)}',
-                'timestamp': int(__import__("time").time() * 1000),
-                'location': 'app.py:35',
-                'message': 'pandas导入成功',
-                'data': {'version': pd.__version__, 'PANDAS_AVAILABLE': True},
-                'sessionId': 'debug-session',
-                'runId': 'run1',
-                'hypothesisId': 'A'
-            }, ensure_ascii=False) + '\n')
-    except: pass
-    # #endregion
-    # #region agent log
     try:
         import openpyxl
         openpyxl_available = True
     except:
         openpyxl_available = False
-    try:
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({
-                'id': f'log_{int(__import__("time").time() * 1000)}',
-                'timestamp': int(__import__("time").time() * 1000),
-                'location': 'app.py:48',
-                'message': '检查openpyxl',
-                'data': {'openpyxl_available': openpyxl_available},
-                'sessionId': 'debug-session',
-                'runId': 'run1',
-                'hypothesisId': 'B'
-            }, ensure_ascii=False) + '\n')
-    except: pass
-    # #endregion
 except ImportError as e:
     PANDAS_AVAILABLE = False
     pd = None
     print(f"[WARN] pandas未安装（Excel/CSV导入功能将不可用）: {e}")
     print("提示: 请运行 'pip install pandas==2.1.4' 安装pandas")
-    # #region agent log
-    try:
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({
-                'id': f'log_{int(__import__("time").time() * 1000)}',
-                'timestamp': int(__import__("time").time() * 1000),
-                'location': 'app.py:58',
-                'message': 'pandas ImportError',
-                'data': {'error': str(e), 'PANDAS_AVAILABLE': False},
-                'sessionId': 'debug-session',
-                'runId': 'run1',
-                'hypothesisId': 'A'
-            }, ensure_ascii=False) + '\n')
-    except: pass
-    # #endregion
 except Exception as e:
     PANDAS_AVAILABLE = False
     pd = None
     print(f"[WARN] pandas导入失败（Excel/CSV导入功能将不可用）: {e}")
     import traceback
     traceback.print_exc()
-    # #region agent log
-    try:
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({
-                'id': f'log_{int(__import__("time").time() * 1000)}',
-                'timestamp': int(__import__("time").time() * 1000),
-                'location': 'app.py:70',
-                'message': 'pandas其他异常',
-                'data': {'error': str(e), 'error_type': type(e).__name__, 'PANDAS_AVAILABLE': False},
-                'sessionId': 'debug-session',
-                'runId': 'run1',
-                'hypothesisId': 'C'
-            }, ensure_ascii=False) + '\n')
-    except: pass
-    # #endregion
 
 # 创建Flask应用实例
 app = Flask(__name__)
@@ -199,7 +143,10 @@ def login():
         username = data.get('username', '').strip()
         password = data.get('password', '').strip()
         
+        print(f'[登录请求] 用户名: {username}, 密码长度: {len(password)}')
+        
         if not username or not password:
+            print(f'[登录失败] 用户名或密码为空')
             return jsonify({
                 'success': False,
                 'message': '用户名和密码不能为空'
@@ -208,6 +155,7 @@ def login():
         # 检查用户是否存在
         user = USERS.get(username)
         if not user:
+            print(f'[登录失败] 用户不存在: {username}')
             return jsonify({
                 'success': False,
                 'message': '用户名或密码错误'
@@ -215,10 +163,13 @@ def login():
         
         # 检查密码（实际项目中应该使用hash比较）
         if user['password'] != password:
+            print(f'[登录失败] 密码错误 - 期望: {user["password"]}, 实际: {password}')
             return jsonify({
                 'success': False,
                 'message': '用户名或密码错误'
             }), 401
+        
+        print(f'[登录成功] 用户: {username}')
         
         # 生成token
         token = generate_token(username)
@@ -283,110 +234,235 @@ def get_current_user():
 def init_database_if_empty():
     """如果数据库为空，则初始化假数据"""
     db = get_db()
-    people = db.get_people()
-    
-    # 检查是否需要初始化
-    need_init = len(people) == 0
-    
-    # 检查趋势数据是否存在
-    if not need_init:
-        trend_data = db.get_trend_data()
-        if len(trend_data) == 0:
-            need_init = True
+    # 使用 count 查询而不是获取所有数据，避免内存问题
+    try:
+        people_count = db.get_people_count()
+        need_init = people_count == 0
+        
+        # 检查趋势数据是否存在（只检查数量，不获取全部数据）
+        if not need_init:
+            try:
+                # 只查询一条数据来检查是否存在
+                trend_data = db.get_trend_data(start_date='2000-01-01', end_date='2000-01-01', limit=1)
+                if len(trend_data) == 0:
+                    need_init = True
+            except:
+                # 如果查询失败，假设需要初始化
+                need_init = True
+    except Exception as e:
+        # 如果查询失败，假设需要初始化
+        print(f'检查数据库状态失败: {e}')
+        need_init = True
     
     if need_init:
-        print('数据库为空或缺少数据，正在初始化假数据...')
-        # 导入初始化脚本
-        from init_database import init_database
-        init_database(clear_existing=False, people_count=8000, movements_count=16000)
-        print('假数据初始化完成！')
-
+        # 暂时禁用自动初始化，避免内存问题
+        # 用户需要手动运行 init_database.py 来初始化数据
+        print('[WARN] 数据库为空，请手动运行 init_database.py 初始化数据')
+        print('[WARN] 或者等待系统内存释放后再试')
+        # from init_database import init_database
+        # init_database(clear_existing=False, people_count=100, movements_count=200)
+        # print('假数据初始化完成！')
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """获取统计数据"""
-    db = get_db()
-    init_database_if_empty()
-    
-    # 先同步地图数据（根据实际人员数据更新地图）
     try:
-        sync_map_data_from_people(db)
-        # 根据地图数据补充人员（如果地图人数大于实际人数）
-        sync_people_from_map_data(db)
+        db = get_db()
+        init_database_if_empty()
+        
+        # 先同步地图数据（根据实际人员数据更新地图）
+        try:
+            sync_map_data_from_people(db)
+            # 根据地图数据补充人员（如果地图人数大于实际人数）
+            sync_people_from_map_data(db)
+        except Exception as e:
+            print(f'同步地图数据失败: {e}')
+        
+        # 从数据库获取统计数据
+        try:
+            stats = db.get_stats()
+        except Exception as e:
+            print(f'获取统计数据失败: {e}')
+            # 如果查询失败，返回默认值
+            stats = {
+                'totalPeople': 0,
+                'confirmedCases': 0,
+                'activeRegions': 0,
+                'todayMovements': 0
+            }
+        
+        # 获取最近10条流动记录作为动态
+        try:
+            movements = db.get_movements(limit=10)
+            recent_activities = []
+            for movement in movements[:10]:
+                activity = {
+                    'id': movement['id'],
+                    'name': movement['name'],
+                    'avatar': movement['avatar'],
+                    'action': f"从{movement['from']}流动到{movement['to']}",
+                    'time': movement['time']
+                }
+                recent_activities.append(activity)
+        except Exception as e:
+            print(f'获取流动记录失败: {e}')
+            recent_activities = []
+        
+        # 从数据库获取地图数据（已同步）
+        try:
+            map_data = db.get_map_data()
+        except Exception as e:
+            print(f'获取地图数据失败: {e}')
+            map_data = []
+        
+        # 如果地图数据为空，生成默认数据
+        if not map_data:
+            try:
+                from init_database import PROVINCES
+                map_data = []
+                for province, (min_val, max_val) in PROVINCES.items():
+                    value = random.randint(min_val, max_val)
+                    map_data.append({'name': province, 'value': value})
+                    try:
+                        db.update_map_data(province, value)
+                    except:
+                        pass  # 如果更新失败，继续
+            except Exception as e:
+                print(f'生成默认地图数据失败: {e}')
+                map_data = []
+        
+        # 获取各省确诊人数排名
+        try:
+            province_ranking = db.get_province_confirmed_ranking()
+        except Exception as e:
+            print(f'获取省份排名失败: {e}')
+            province_ranking = []
+        
+        return jsonify({
+            'stats': stats,
+            'recentActivities': recent_activities,
+            'mapData': map_data,
+            'provinceRanking': province_ranking
+        })
     except Exception as e:
-        print(f'同步地图数据失败: {e}')
-    
-    # 从数据库获取统计数据
-    stats = db.get_stats()
-    
-    # 获取最近10条流动记录作为动态
-    movements = db.get_movements()
-    recent_activities = []
-    for movement in movements[:10]:
-        activity = {
-            'id': movement['id'],
-            'name': movement['name'],
-            'avatar': movement['avatar'],
-            'action': f"从{movement['from']}流动到{movement['to']}",
-            'time': movement['time']
-        }
-        recent_activities.append(activity)
-    
-    # 从数据库获取地图数据（已同步）
-    map_data = db.get_map_data()
-    
-    # 如果地图数据为空，生成默认数据
-    if not map_data:
-        from init_database import PROVINCES
-        map_data = []
-        for province, (min_val, max_val) in PROVINCES.items():
-            value = random.randint(min_val, max_val)
-            map_data.append({'name': province, 'value': value})
-            db.update_map_data(province, value)
-    
-    # 获取各省确诊人数排名
-    try:
-        province_ranking = db.get_province_confirmed_ranking()
-    except Exception as e:
-        print(f'获取省份排名失败: {e}')
+        print(f'获取统计数据异常: {e}')
         import traceback
         traceback.print_exc()
-        province_ranking = []
-    
-    return jsonify({
-        'stats': stats,
-        'recentActivities': recent_activities,
-        'mapData': map_data,
-        'provinceRanking': province_ranking
-    })
+        # 返回默认数据，确保前端不会崩溃
+        return jsonify({
+            'stats': {
+                'totalPeople': 0,
+                'confirmedCases': 0,
+                'activeRegions': 0,
+                'todayMovements': 0
+            },
+            'recentActivities': [],
+            'mapData': [],
+            'provinceRanking': []
+        }), 200
 
 @app.route('/api/people', methods=['GET'])
 def get_people():
-    """获取人员列表，支持分页"""
-    db = get_db()
-    init_database_if_empty()
-    
-    # 获取分页参数
-    page = request.args.get('page', type=int)
-    page_size = request.args.get('page_size', type=int)
-    
-    # 如果提供了分页参数，使用分页查询
-    if page is not None and page_size is not None:
-        people = db.get_people(page=page, page_size=page_size)
-        total_count = db.get_people_count()
-        return jsonify({
-            'data': people,
-            'pagination': {
-            'page': page,
-            'page_size': page_size,
-                'total': total_count,
-                'total_pages': (total_count + page_size - 1) // page_size
-            }
-        })
-    else:
-        # 兼容旧接口，返回所有数据
-        people = db.get_people()
-        return jsonify(people)
+    """获取人员列表，支持分页和标签筛选"""
+    try:
+        db = get_db()
+        init_database_if_empty()
+        
+        # 获取分页参数
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', type=int)
+        
+        # 获取搜索和标签筛选参数
+        search_query = request.args.get('search', type=str)
+        tags_json = request.args.get('tags', type=str)  # JSON 字符串格式的标签列表
+        
+        # 解析标签
+        tags = []
+        if tags_json:
+            try:
+                tags = json.loads(tags_json)
+            except:
+                pass
+        
+        # 如果提供了标签筛选，使用标签服务
+        if tags and TAG_SERVICE_AVAILABLE:
+            try:
+                tag_service = get_tag_service(db)
+                result = tag_service.filter_people_by_tags(
+                    tags=tags,
+                    search_query=search_query,
+                    page=page or 1,
+                    page_size=page_size or 30
+                )
+                return jsonify({
+                    'data': result['data'],
+                    'pagination': {
+                        'page': result['page'],
+                        'page_size': result['page_size'],
+                        'total': result['total'],
+                        'total_pages': result['total_pages']
+                    }
+                })
+            except Exception as e:
+                print(f'标签筛选失败: {e}')
+                import traceback
+                traceback.print_exc()
+                # 降级到普通查询
+        
+        # 普通查询（无标签筛选或标签服务不可用）
+        # 如果提供了分页参数，使用分页查询
+        if page is not None and page_size is not None:
+            try:
+                # 如果有搜索条件，需要先过滤
+                if search_query:
+                    # 简单搜索：获取所有数据后过滤（性能较差，但兼容现有逻辑）
+                    all_people = db.get_people(limit=10000)
+                    filtered = [
+                        p for p in all_people
+                        if search_query.lower() in (p.get('name', '') or '').lower() or
+                           search_query in (p.get('id_card', '') or '')
+                    ]
+                    total_count = len(filtered)
+                    start = (page - 1) * page_size
+                    end = start + page_size
+                    people = filtered[start:end]
+                else:
+                    people = db.get_people(page=page, page_size=page_size)
+                    total_count = db.get_people_count()
+                
+                return jsonify({
+                    'data': people,
+                    'pagination': {
+                        'page': page,
+                        'page_size': page_size,
+                        'total': total_count,
+                        'total_pages': (total_count + page_size - 1) // page_size
+                    }
+                })
+            except Exception as e:
+                print(f'获取人员列表失败: {e}')
+                return jsonify({
+                    'data': [],
+                    'pagination': {
+                        'page': page,
+                        'page_size': page_size,
+                        'total': 0,
+                        'total_pages': 0
+                    }
+                }), 200
+        else:
+            # 兼容旧接口，但限制返回数量避免内存问题
+            try:
+                people = db.get_people(limit=1000)
+                return jsonify(people)
+            except Exception as e:
+                print(f'获取人员列表失败: {e}')
+                return jsonify([]), 200
+    except Exception as e:
+        print(f'获取人员列表异常: {e}')
+        import traceback
+        traceback.print_exc()
+        return jsonify([]), 200
 
 @app.route('/api/people', methods=['POST'])
 def create_person():
@@ -423,42 +499,11 @@ def test_connection():
 @app.route('/api/local-people/import-file', methods=['POST', 'OPTIONS', 'GET'])
 def import_local_people_file():
     """导入人员数据到本地人员库（支持JSON/Excel/CSV文件）"""
-    # #region agent log
-    import json
-    import os
-    log_path = r'f:\all\projects\chaoyangV1.0.1\.cursor\debug.log'
-    try:
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({
-                'id': f'log_{int(__import__("time").time() * 1000)}',
-                'timestamp': int(__import__("time").time() * 1000),
-                'location': 'app.py:229',
-                'message': '路由函数被调用',
-                'data': {'method': request.method, 'path': request.path},
-                'sessionId': 'debug-session',
-                'runId': 'run1',
-                'hypothesisId': 'A'
-            }, ensure_ascii=False) + '\n')
-    except: pass
-    # #endregion
+    
     
     # 处理CORS预检请求
     if request.method == 'OPTIONS':
-        # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({
-                    'id': f'log_{int(__import__("time").time() * 1000)}',
-                    'timestamp': int(__import__("time").time() * 1000),
-                    'location': 'app.py:233',
-                    'message': 'OPTIONS请求处理',
-                    'data': {},
-                    'sessionId': 'debug-session',
-                    'runId': 'run1',
-                    'hypothesisId': 'A'
-                }, ensure_ascii=False) + '\n')
-        except: pass
-        # #endregion
+        
         response = jsonify({})
         response.headers.add('Access-Control-Allow-Origin', '*')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
@@ -467,21 +512,7 @@ def import_local_people_file():
     
     # 处理GET请求（用于测试或错误提示）
     if request.method == 'GET':
-        # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({
-                    'id': f'log_{int(__import__("time").time() * 1000)}',
-                    'timestamp': int(__import__("time").time() * 1000),
-                    'location': 'app.py:274',
-                    'message': 'GET请求处理',
-                    'data': {},
-                    'sessionId': 'debug-session',
-                    'runId': 'run1',
-                    'hypothesisId': 'A'
-                }, ensure_ascii=False) + '\n')
-        except: pass
-        # #endregion
+        
         return jsonify({
             'error': '此接口仅支持POST请求',
             'message': '请使用POST方法上传文件',
@@ -492,21 +523,7 @@ def import_local_people_file():
         import sys
         sys.stdout.flush()  # 强制刷新输出缓冲区
         
-        # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({
-                    'id': f'log_{int(__import__("time").time() * 1000)}',
-                    'timestamp': int(__import__("time").time() * 1000),
-                    'location': 'app.py:288',
-                    'message': 'POST请求进入try块',
-                    'data': {'method': request.method, 'content_type': request.content_type, 'has_files': bool(request.files)},
-                    'sessionId': 'debug-session',
-                    'runId': 'run1',
-                    'hypothesisId': 'B'
-                }, ensure_ascii=False) + '\n')
-        except: pass
-        # #endregion
+        
         
         print('=' * 50, flush=True)
         print('=== 本地人员库文件导入请求开始 ===', flush=True)
@@ -516,61 +533,19 @@ def import_local_people_file():
         print('=' * 50, flush=True)
         print('请求文件:', request.files, flush=True)
         
-        # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({
-                    'id': f'log_{int(__import__("time").time() * 1000)}',
-                    'timestamp': int(__import__("time").time() * 1000),
-                    'location': 'app.py:323',
-                    'message': '检查request.files',
-                    'data': {'has_files': bool(request.files), 'files_keys': list(request.files.keys()) if request.files else []},
-                    'sessionId': 'debug-session',
-                    'runId': 'run1',
-                    'hypothesisId': 'C'
-                }, ensure_ascii=False) + '\n')
-        except: pass
-        # #endregion
+        
         
         db = get_db()
 
         if 'file' not in request.files:
-            # #region agent log
-            try:
-                with open(log_path, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({
-                        'id': f'log_{int(__import__("time").time() * 1000)}',
-                        'timestamp': int(__import__("time").time() * 1000),
-                        'location': 'app.py:327',
-                        'message': '错误：请求中没有file字段',
-                        'data': {'available_files': list(request.files.keys())},
-                        'sessionId': 'debug-session',
-                        'runId': 'run1',
-                        'hypothesisId': 'C'
-                    }, ensure_ascii=False) + '\n')
-            except: pass
-            # #endregion
+            
             print('错误：请求中没有file字段', flush=True)
             print('可用的文件字段:', list(request.files.keys()), flush=True)
             print('请求表单数据:', request.form, flush=True)
             return jsonify({'error': '未选择文件', 'available_files': list(request.files.keys())}), 400
 
         file = request.files['file']
-        # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({
-                    'id': f'log_{int(__import__("time").time() * 1000)}',
-                    'timestamp': int(__import__("time").time() * 1000),
-                    'location': 'app.py:333',
-                    'message': '文件对象获取成功',
-                    'data': {'filename': file.filename if file else None},
-                    'sessionId': 'debug-session',
-                    'runId': 'run1',
-                    'hypothesisId': 'D'
-                }, ensure_ascii=False) + '\n')
-        except: pass
-        # #endregion
+        
         print('文件对象:', file, flush=True)
         print('文件名:', file.filename, flush=True)
         print('文件大小:', file.content_length if hasattr(file, 'content_length') else '未知', flush=True)
@@ -592,21 +567,7 @@ def import_local_people_file():
         filename = secure_filename(file.filename)
         file_ext = os.path.splitext(filename)[1].lower()
         print('文件扩展名:', file_ext, flush=True)
-        # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({
-                    'id': f'log_{int(__import__("time").time() * 1000)}',
-                    'timestamp': int(__import__("time").time() * 1000),
-                    'location': 'app.py:432',
-                    'message': '文件扩展名检测',
-                    'data': {'filename': filename, 'file_ext': file_ext, 'is_excel': file_ext in ['.xlsx', '.xls']},
-                    'sessionId': 'debug-session',
-                    'runId': 'run1',
-                    'hypothesisId': 'D'
-                }, ensure_ascii=False) + '\n')
-        except: pass
-        # #endregion
+        
 
         people_list = []
 
@@ -634,181 +595,35 @@ def import_local_people_file():
             # 动态检查pandas是否可用（因为可能在启动后安装）
             pandas_available_now = PANDAS_AVAILABLE
             pd_module = pd
-            # #region agent log
-            try:
-                with open(log_path, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({
-                        'id': f'log_{int(__import__("time").time() * 1000)}',
-                        'timestamp': int(__import__("time").time() * 1000),
-                        'location': 'app.py:524',
-                        'message': '检查pandas初始状态',
-                        'data': {'PANDAS_AVAILABLE': PANDAS_AVAILABLE, 'pd_is_none': pd is None},
-                        'sessionId': 'debug-session',
-                        'runId': 'post-fix-v2',
-                        'hypothesisId': 'A'
-                    }, ensure_ascii=False) + '\n')
-            except: pass
-            # #endregion
+            
             if not pandas_available_now or pd_module is None:
-                # #region agent log
-                try:
-                    with open(log_path, 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({
-                            'id': f'log_{int(__import__("time").time() * 1000)}',
-                            'timestamp': int(__import__("time").time() * 1000),
-                            'location': 'app.py:540',
-                            'message': '尝试动态导入pandas',
-                            'data': {},
-                            'sessionId': 'debug-session',
-                            'runId': 'post-fix-v2',
-                            'hypothesisId': 'A'
-                        }, ensure_ascii=False) + '\n')
-                except: pass
-                # #endregion
+                
                 try:
                     import sys
                     import pandas as pd_module
                     pandas_available_now = True
-                    # #region agent log
-                    try:
-                        with open(log_path, 'a', encoding='utf-8') as f:
-                            f.write(json.dumps({
-                                'id': f'log_{int(__import__("time").time() * 1000)}',
-                                'timestamp': int(__import__("time").time() * 1000),
-                                'location': 'app.py:555',
-                                'message': '运行时动态导入pandas成功',
-                                'data': {'version': pd_module.__version__, 'pd_module_type': str(type(pd_module)), 'python_executable': sys.executable},
-                                'sessionId': 'debug-session',
-                                'runId': 'post-fix-v2',
-                                'hypothesisId': 'A'
-                            }, ensure_ascii=False) + '\n')
-                    except: pass
-                    # #endregion
+                    
                 except ImportError as e:
                     pandas_available_now = False
-                    # #region agent log
-                    try:
-                        import sys
-                        with open(log_path, 'a', encoding='utf-8') as f:
-                            f.write(json.dumps({
-                                'id': f'log_{int(__import__("time").time() * 1000)}',
-                                'timestamp': int(__import__("time").time() * 1000),
-                                'location': 'app.py:570',
-                                'message': '运行时动态导入pandas失败 - ImportError',
-                                'data': {'error': str(e), 'error_type': type(e).__name__, 'python_executable': sys.executable, 'sys_path': sys.path[:3]},
-                                'sessionId': 'debug-session',
-                                'runId': 'post-fix-v2',
-                                'hypothesisId': 'A'
-                            }, ensure_ascii=False) + '\n')
-                    except: pass
-                    # #endregion
+                    
                 except Exception as e:
                     pandas_available_now = False
-                    # #region agent log
-                    try:
-                        with open(log_path, 'a', encoding='utf-8') as f:
-                            f.write(json.dumps({
-                                'id': f'log_{int(__import__("time").time() * 1000)}',
-                                'timestamp': int(__import__("time").time() * 1000),
-                                'location': 'app.py:585',
-                                'message': '运行时动态导入pandas失败 - 其他异常',
-                                'data': {'error': str(e), 'error_type': type(e).__name__},
-                                'sessionId': 'debug-session',
-                                'runId': 'post-fix-v2',
-                                'hypothesisId': 'A'
-                            }, ensure_ascii=False) + '\n')
-                    except: pass
-                    # #endregion
+                    
             
-            # #region agent log
-            try:
-                with open(log_path, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({
-                        'id': f'log_{int(__import__("time").time() * 1000)}',
-                        'timestamp': int(__import__("time").time() * 1000),
-                        'location': 'app.py:456',
-                        'message': 'Excel文件处理开始',
-                        'data': {'file_ext': file_ext, 'PANDAS_AVAILABLE_startup': PANDAS_AVAILABLE, 'pandas_available_now': pandas_available_now, 'pd_is_none': pd_module is None},
-                        'sessionId': 'debug-session',
-                        'runId': 'post-fix',
-                        'hypothesisId': 'A'
-                    }, ensure_ascii=False) + '\n')
-            except: pass
-            # #endregion
+            
             
             if not pandas_available_now or pd_module is None:
-                # #region agent log
-                try:
-                    with open(log_path, 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({
-                            'id': f'log_{int(__import__("time").time() * 1000)}',
-                            'timestamp': int(__import__("time").time() * 1000),
-                            'location': 'app.py:470',
-                            'message': 'pandas不可用，返回错误',
-                            'data': {'pandas_available_now': pandas_available_now},
-                            'sessionId': 'debug-session',
-                            'runId': 'post-fix',
-                            'hypothesisId': 'A'
-                        }, ensure_ascii=False) + '\n')
-                except: pass
-                # #endregion
+                
                 return jsonify({'error': 'Excel文件解析需要pandas库，请安装：pip install pandas openpyxl'}), 400
             try:
                 import io
-                # #region agent log
-                try:
-                    with open(log_path, 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({
-                            'id': f'log_{int(__import__("time").time() * 1000)}',
-                            'timestamp': int(__import__("time").time() * 1000),
-                            'location': 'app.py:490',
-                            'message': '准备读取Excel文件',
-                            'data': {'pd_module_available': pd_module is not None},
-                            'sessionId': 'debug-session',
-                            'runId': 'post-fix',
-                            'hypothesisId': 'B'
-                        }, ensure_ascii=False) + '\n')
-                except: pass
-                # #endregion
+                
                 file_content = file.read()
                 file_stream = io.BytesIO(file_content)
-                # #region agent log
-                try:
-                    import openpyxl
-                    openpyxl_check = True
-                except ImportError:
-                    openpyxl_check = False
-                try:
-                    with open(log_path, 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({
-                            'id': f'log_{int(__import__("time").time() * 1000)}',
-                            'timestamp': int(__import__("time").time() * 1000),
-                            'location': 'app.py:503',
-                            'message': '调用pd.read_excel前检查openpyxl',
-                            'data': {'openpyxl_available': openpyxl_check},
-                            'sessionId': 'debug-session',
-                            'runId': 'post-fix',
-                            'hypothesisId': 'B'
-                        }, ensure_ascii=False) + '\n')
-                except: pass
-                # #endregion
+                
                 df = pd_module.read_excel(file_stream)
                 print(f'[DEBUG] Excel文件读取成功，共 {len(df)} 行，列名: {list(df.columns)}')
-                # #region agent log
-                try:
-                    with open(log_path, 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({
-                            'id': f'log_{int(__import__("time").time() * 1000)}',
-                            'timestamp': int(__import__("time").time() * 1000),
-                            'location': 'app.py:516',
-                            'message': 'Excel文件读取成功',
-                            'data': {'row_count': len(df), 'columns': list(df.columns)},
-                            'sessionId': 'debug-session',
-                            'runId': 'post-fix',
-                            'hypothesisId': 'B'
-                        }, ensure_ascii=False) + '\n')
-                except: pass
-                # #endregion
+                
                 
                 # 处理idCard列，防止Excel将其读取为科学计数法
                 def convert_idcard(value):
@@ -910,21 +725,7 @@ def import_local_people_file():
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                # #region agent log
-                try:
-                    with open(log_path, 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({
-                            'id': f'log_{int(__import__("time").time() * 1000)}',
-                            'timestamp': int(__import__("time").time() * 1000),
-                            'location': 'app.py:607',
-                            'message': 'Excel文件解析异常',
-                            'data': {'error': str(e), 'error_type': type(e).__name__, 'traceback': traceback.format_exc()},
-                            'sessionId': 'debug-session',
-                            'runId': 'post-fix',
-                            'hypothesisId': 'B'
-                        }, ensure_ascii=False) + '\n')
-                except: pass
-                # #endregion
+                
                 return jsonify({'error': f'Excel文件解析错误：{str(e)}'}), 400
 
         elif file_ext == '.csv':
@@ -1026,40 +827,12 @@ def import_local_people_file():
         print(f'[DEBUG] 解析到 {len(people_list)} 条数据', flush=True)
         print(f'[DEBUG] 前3条数据示例: {people_list[:3] if len(people_list) >= 3 else people_list}', flush=True)
 
-        # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({
-                    'id': f'log_{int(__import__("time").time() * 1000)}',
-                    'timestamp': int(__import__("time").time() * 1000),
-                    'location': 'app.py:579',
-                    'message': '准备调用batch_create_local_people',
-                    'data': {'people_count': len(people_list)},
-                    'sessionId': 'debug-session',
-                    'runId': 'run1',
-                    'hypothesisId': 'D'
-                }, ensure_ascii=False) + '\n')
-        except: pass
-        # #endregion
+        
         
         # 批量导入到本地人员库
         count = db.batch_create_local_people(people_list)
         
-        # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({
-                    'id': f'log_{int(__import__("time").time() * 1000)}',
-                    'timestamp': int(__import__("time").time() * 1000),
-                    'location': 'app.py:580',
-                    'message': 'batch_create_local_people返回',
-                    'data': {'count': count},
-                    'sessionId': 'debug-session',
-                    'runId': 'run1',
-                    'hypothesisId': 'D'
-                }, ensure_ascii=False) + '\n')
-        except: pass
-        # #endregion
+        
         
         print(f'[DEBUG] 导入完成，返回count: {count}', flush=True)
         print('=' * 50, flush=True)
@@ -1072,21 +845,7 @@ def import_local_people_file():
         })
     except Exception as e:
         import traceback
-        # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({
-                    'id': f'log_{int(__import__("time").time() * 1000)}',
-                    'timestamp': int(__import__("time").time() * 1000),
-                    'location': 'app.py:591',
-                    'message': '异常捕获',
-                    'data': {'error': str(e), 'error_type': type(e).__name__},
-                    'sessionId': 'debug-session',
-                    'runId': 'run1',
-                    'hypothesisId': 'E'
-                }, ensure_ascii=False) + '\n')
-        except: pass
-        # #endregion
+        
         traceback.print_exc()
         return jsonify({
             'error': '导入失败',
@@ -1095,14 +854,20 @@ def import_local_people_file():
 
 @app.route('/api/local-people', methods=['GET'])
 def get_local_people():
-    """获取所有本地人员数据"""
-    db = get_db()
-    local_people = db.get_local_people()
-    return jsonify(local_people)
+    """获取所有本地人员数据（已合并到 people 表）"""
+    try:
+        db = get_db()
+        local_people = db.get_local_people()
+        return jsonify(local_people)
+    except Exception as e:
+        print(f'获取本地人员列表失败: {e}')
+        import traceback
+        traceback.print_exc()
+        return jsonify([]), 200
 
 @app.route('/api/local-people/<int:person_id>', methods=['GET'])
 def get_local_person_detail(person_id):
-    """获取单个本地人员详情"""
+    """获取单个本地人员详情（已合并到 people 表）"""
     db = get_db()
     person = db.get_local_person(person_id)
     if not person:
@@ -1111,7 +876,7 @@ def get_local_person_detail(person_id):
 
 @app.route('/api/local-people/batch-delete', methods=['POST'])
 def batch_delete_local_people():
-    """批量删除本地人员"""
+    """批量删除本地人员（已合并到 people 表）"""
     try:
         data = request.json
         person_ids = data.get('ids', [])
@@ -1139,7 +904,7 @@ def batch_delete_local_people():
 
 @app.route('/api/local-people/clear', methods=['POST'])
 def clear_all_local_people():
-    """清空所有本地人员"""
+    """清空所有本地人员（已合并到 people 表，此操作会清空所有人员数据，请谨慎使用）"""
     try:
         db = get_db()
         count = db.clear_all_local_people()
@@ -1209,64 +974,45 @@ def delete_person(person_id):
 @app.route('/api/key-persons', methods=['GET'])
 def get_key_persons():
     """获取重点人员列表"""
-    db = get_db()
-    init_database_if_empty()
-    category = request.args.get('category')
-    if category and category != '全部':
-        key_persons = db.get_key_persons(category=category)
-    else:
-        key_persons = db.get_key_persons()
-    return jsonify(key_persons)
+    try:
+        db = get_db()
+        init_database_if_empty()
+        category = request.args.get('category')
+        if category and category != '全部':
+            key_persons = db.get_key_persons(category=category)
+        else:
+            key_persons = db.get_key_persons()
+        return jsonify(key_persons)
+    except Exception as e:
+        print(f'获取重点人员列表失败: {e}')
+        import traceback
+        traceback.print_exc()
+        return jsonify([]), 200
 
 @app.route('/api/key-persons/categories', methods=['GET'])
 def get_key_person_categories():
     """获取所有重点人员类别"""
-    db = get_db()
-    init_database_if_empty()
-    categories = db.get_key_person_categories()
-    return jsonify(categories)
+    try:
+        db = get_db()
+        init_database_if_empty()
+        categories = db.get_key_person_categories()
+        return jsonify(categories)
+    except Exception as e:
+        print(f'获取重点人员类别失败: {e}')
+        import traceback
+        traceback.print_exc()
+        return jsonify([]), 200
 
 @app.route('/api/key-persons', methods=['POST'])
 def add_key_person():
     """添加重点人员"""
-    # #region agent log
-    import json
-    try:
-        with open(r'f:\all\projects\chaoyangV1.0.1\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({
-                'id': f'log_{int(__import__("time").time() * 1000)}',
-                'timestamp': int(__import__("time").time() * 1000),
-                'location': 'app.py:826',
-                'message': 'add_key_person函数被调用',
-                'data': {'method': request.method if request else 'N/A'},
-                'sessionId': 'debug-session',
-                'runId': 'run1',
-                'hypothesisId': 'A'
-            }, ensure_ascii=False) + '\n')
-    except:
-        pass
-    # #endregion
+    
     
     db = get_db()
     init_database_if_empty()
     data = request.json
     
-    # #region agent log
-    try:
-        with open(r'f:\all\projects\chaoyangV1.0.1\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({
-                'id': f'log_{int(__import__("time").time() * 1000)}',
-                'timestamp': int(__import__("time").time() * 1000),
-                'location': 'app.py:830',
-                'message': '解析请求数据',
-                'data': {'has_data': bool(data), 'person_id': data.get('personId') if data else None, 'category': data.get('category') if data else None},
-                'sessionId': 'debug-session',
-                'runId': 'run1',
-                'hypothesisId': 'B'
-            }, ensure_ascii=False) + '\n')
-    except:
-        pass
-    # #endregion
+    
     
     person_id = data.get('personId')
     category = data.get('category')
@@ -1276,22 +1022,7 @@ def add_key_person():
     if not person_id or not category:
         return jsonify({'error': '缺少必要参数'}), 400
     
-    # #region agent log
-    try:
-        with open(r'f:\all\projects\chaoyangV1.0.1\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({
-                'id': f'log_{int(__import__("time").time() * 1000)}',
-                'timestamp': int(__import__("time").time() * 1000),
-                'location': 'app.py:839',
-                'message': '调用add_key_person前',
-                'data': {'person_id': person_id, 'category': category, 'priority_level': priority_level},
-                'sessionId': 'debug-session',
-                'runId': 'run1',
-                'hypothesisId': 'C'
-            }, ensure_ascii=False) + '\n')
-    except:
-        pass
-    # #endregion
+    
     
     key_person = db.add_key_person(person_id, category, priority_level, reason)
     return jsonify(key_person), 201
@@ -1351,22 +1082,34 @@ def get_situation():
         
         # 从数据库获取流动记录
         # 对于"全部"数据，限制查询数量以提高性能（最多查询1000条）
-        movement_limit = 1000 if period == 'all' else None
-        movements = db.get_movements({
-            'from_date': start_date.strftime('%Y-%m-%d %H:%M:%S')
-        }, limit=movement_limit)
+        try:
+            movement_limit = 1000 if period == 'all' else None
+            movements = db.get_movements({
+                'from_date': start_date.strftime('%Y-%m-%d %H:%M:%S')
+            }, limit=movement_limit)
+        except Exception as e:
+            print(f'获取流动记录失败: {e}')
+            movements = []
         
         # 使用SQL聚合查询获取地区分布数据，而不是获取所有人员数据
         # 这样更高效，特别是当数据量很大时
-        cursor = db.connection.cursor()
-        cursor.execute('SELECT region, COUNT(*) as count FROM people GROUP BY region')
-        region_rows = cursor.fetchall()
-        region_data = [{'name': row[0] or '未知', 'value': row[1]} for row in region_rows]
+        try:
+            cursor = db.connection.cursor()
+            cursor.execute('SELECT region, COUNT(*) as count FROM people GROUP BY region')
+            region_rows = cursor.fetchall()
+            region_data = [{'name': row[0] or '未知', 'value': row[1]} for row in region_rows]
+        except Exception as e:
+            print(f'获取地区分布数据失败: {e}')
+            region_data = []
         
         # 从数据库获取趋势数据
-        end_date = now.strftime('%Y-%m-%d')
-        start_date_str = start_date.strftime('%Y-%m-%d')
-        trend_data_list = db.get_trend_data(start_date=start_date_str, end_date=end_date)
+        try:
+            end_date = now.strftime('%Y-%m-%d')
+            start_date_str = start_date.strftime('%Y-%m-%d')
+            trend_data_list = db.get_trend_data(start_date=start_date_str, end_date=end_date, limit=100)
+        except Exception as e:
+            print(f'获取趋势数据失败: {e}')
+            trend_data_list = []
         
         # 如果数据库中没有趋势数据，生成最近7天的默认数据
         if not trend_data_list:
@@ -1395,16 +1138,29 @@ def get_situation():
             recovered_trend = [item['recoveredCount'] for item in trend_data_list]
         
         # 状态分布
-        status_dist = db.count_people_by_status()
-        status_distribution = [
-            {'value': status_dist.get('正常', 0), 'name': '正常'},
-            {'value': status_dist.get('疑似', 0), 'name': '疑似'},
-            {'value': status_dist.get('确诊', 0), 'name': '确诊'},
-            {'value': status_dist.get('康复', 0), 'name': '康复'}
-        ]
+        try:
+            status_dist = db.count_people_by_status()
+            status_distribution = [
+                {'value': status_dist.get('正常', 0), 'name': '正常'},
+                {'value': status_dist.get('疑似', 0), 'name': '疑似'},
+                {'value': status_dist.get('确诊', 0), 'name': '确诊'},
+                {'value': status_dist.get('康复', 0), 'name': '康复'}
+            ]
+        except Exception as e:
+            print(f'获取状态分布失败: {e}')
+            status_distribution = [
+                {'value': 0, 'name': '正常'},
+                {'value': 0, 'name': '疑似'},
+                {'value': 0, 'name': '确诊'},
+                {'value': 0, 'name': '康复'}
+            ]
         
         # 从数据库获取流动统计
-        flow_statistics = db.get_flow_statistics(period=period)
+        try:
+            flow_statistics = db.get_flow_statistics(period=period)
+        except Exception as e:
+            print(f'获取流动统计失败: {e}')
+            flow_statistics = []
         
         # 如果数据库中没有流动统计，从流动记录计算并保存
         if not flow_statistics:
@@ -1424,10 +1180,11 @@ def get_situation():
                     region_flows[to_region] = 0
                 region_flows[to_region] += 1
             
-            # 如果没有流动记录，从人员数据生成
+            # 如果没有流动记录，生成默认数据
             if not region_flows:
-                flow_regions = list(set(p.get('region', '未知') for p in people))
-                for region in flow_regions:
+                # 不查询所有人员数据，直接生成默认数据
+                default_regions = ['北京', '上海', '广东', '浙江', '江苏']
+                for region in default_regions:
                     region_flows[region] = random.randint(10, 50)
             
             # 保存到数据库
@@ -1460,19 +1217,31 @@ def get_situation():
             'suspectedTrend': suspected_trend,
             'recoveredTrend': recovered_trend,
             'statusDistribution': status_distribution,
-            'flowRegions': flow_regions,
-            'flowCounts': flow_counts,
-            'movements': sorted_movements
+            'flowRegions': flow_regions if 'flow_regions' in locals() else [],
+            'flowCounts': flow_counts if 'flow_counts' in locals() else [],
+            'movements': sorted_movements if 'sorted_movements' in locals() else []
         })
     except Exception as e:
+        print(f'获取态势感知数据异常: {e}')
         import traceback
-        error_msg = str(e)
         traceback.print_exc()
+        # 返回默认数据，确保前端不会崩溃
         return jsonify({
-            'error': '获取态势数据失败',
-            'message': error_msg,
-            'traceback': traceback.format_exc()
-        }), 500
+            'regionData': [],
+            'trendDates': [],
+            'confirmedTrend': [],
+            'suspectedTrend': [],
+            'recoveredTrend': [],
+            'statusDistribution': [
+                {'value': 0, 'name': '正常'},
+                {'value': 0, 'name': '疑似'},
+                {'value': 0, 'name': '确诊'},
+                {'value': 0, 'name': '康复'}
+            ],
+            'flowRegions': [],
+            'flowCounts': [],
+            'movements': []
+        }), 200
 
 @app.route('/api/news', methods=['GET'])
 def get_news():
@@ -1657,8 +1426,360 @@ if __name__ == '__main__':
         if len(people) == 0:
             print('数据库为空，正在初始化假数据...')
             from init_database import init_database
-            init_database(clear_existing=False, people_count=8000, movements_count=16000)
+            init_database(clear_existing=False, people_count=100, movements_count=200)
             print('假数据初始化完成！')
     
+    # 文档工作区相关接口
+    if DOCUMENT_SERVICE_AVAILABLE:
+        @app.route('/api/documents', methods=['GET'])
+        def get_documents():
+            """获取文档列表"""
+            try:
+                area = request.args.get('area', 'public')
+                user = request.headers.get('X-User', None)
+                
+                db = get_db()
+                doc_service = get_document_service(db)
+                documents = doc_service.get_documents(area, user)
+                
+                return jsonify(documents)
+            except Exception as e:
+                print(f'获取文档列表失败: {e}')
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': str(e)}), 500
+
+        @app.route('/api/documents/upload', methods=['POST'])
+        def upload_document():
+            """上传文档"""
+            try:
+                if 'file' not in request.files:
+                    return jsonify({'error': '没有文件'}), 400
+                
+                file = request.files['file']
+                area = request.form.get('area', 'public')
+                user = request.headers.get('X-User', 'anonymous')
+                
+                if file.filename == '':
+                    return jsonify({'error': '文件名为空'}), 400
+                
+                db = get_db()
+                if not db:
+                    return jsonify({'error': '数据库连接失败'}), 500
+                
+                doc_service = get_document_service(db)
+                if not doc_service:
+                    return jsonify({'error': '文档服务初始化失败'}), 500
+                
+                result = doc_service.save_document(file, area, user)
+                
+                if not result:
+                    return jsonify({'error': '文档保存失败'}), 500
+                
+                return jsonify(result), 201
+            except Exception as e:
+                error_msg = str(e)
+                print(f'上传文档失败: {error_msg}')
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': error_msg}), 500
+
+        @app.route('/api/documents/<int:document_id>/preview', methods=['GET'])
+        def get_document_preview(document_id):
+            """获取文档预览"""
+            try:
+                db = get_db()
+                cursor = db.connection.cursor(pymysql.cursors.DictCursor)
+                cursor.execute('SELECT file_path, file_type, name FROM documents WHERE id = %s', (document_id,))
+                doc = cursor.fetchone()
+                
+                if not doc:
+                    return jsonify({'error': '文档不存在'}), 404
+                
+                # OnlyOffice 配置
+                onlyoffice_url = os.getenv('ONLYOFFICE_URL', 'http://localhost:8081')
+                
+                # 生成文档访问URL（需要可以从 OnlyOffice 访问）
+                document_url = request.url_root.rstrip('/') + f'/api/documents/{document_id}/file'
+                
+                # 生成 OnlyOffice 预览配置
+                file_type_lower = doc['file_type'].lower()
+                
+                # 确定文档类型
+                if file_type_lower in ['doc', 'docx', 'txt', 'rtf', 'odt']:
+                    doc_type = 'text'
+                elif file_type_lower in ['xls', 'xlsx', 'ods']:
+                    doc_type = 'spreadsheet'
+                elif file_type_lower in ['ppt', 'pptx', 'odp']:
+                    doc_type = 'presentation'
+                else:
+                    doc_type = 'text'
+                
+                # 生成文档密钥（用于缓存）
+                doc_key = hashlib.md5(f"{document_id}_{doc['name']}_{doc['file_path']}".encode()).hexdigest()
+                
+                preview_config = {
+                    'document': {
+                        'fileType': file_type_lower,
+                        'key': doc_key,
+                        'title': doc['name'],
+                        'url': document_url
+                    },
+                    'documentType': doc_type,
+                    'editorConfig': {
+                        'mode': 'view',  # 预览模式，不允许编辑
+                        'lang': 'zh-CN'
+                    }
+                }
+                
+                download_url = f'/api/documents/{document_id}/download'
+                
+                # 支持 OnlyOffice 的文件类型
+                onlyoffice_supported = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'pdf', 'txt', 'rtf', 'odt', 'ods', 'odp']
+                file_type_lower = doc['file_type'].lower()
+                
+                result = {
+                    'preview_url': document_url,
+                    'download_url': download_url,
+                    'file_type': doc['file_type'],
+                    'file_name': doc['name']
+                }
+                
+                # 如果文件类型支持 OnlyOffice，添加配置
+                if file_type_lower in onlyoffice_supported:
+                    result['onlyoffice_url'] = onlyoffice_url
+                    result['onlyoffice_config'] = preview_config
+                
+                return jsonify(result)
+            except Exception as e:
+                print(f'获取文档预览失败: {e}')
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': str(e)}), 500
+
+        @app.route('/api/documents/<int:document_id>/file', methods=['GET'])
+        def get_document_file(document_id):
+            """获取文档文件（用于预览）"""
+            try:
+                db = get_db()
+                cursor = db.connection.cursor(pymysql.cursors.DictCursor)
+                cursor.execute('SELECT file_path, file_type FROM documents WHERE id = %s', (document_id,))
+                doc = cursor.fetchone()
+                
+                if not doc or not os.path.exists(doc['file_path']):
+                    return jsonify({'error': '文档不存在'}), 404
+                
+                return send_file(doc['file_path'], as_attachment=False)
+            except Exception as e:
+                print(f'获取文档文件失败: {e}')
+                return jsonify({'error': str(e)}), 500
+
+        @app.route('/api/documents/<int:document_id>/download', methods=['GET'])
+        def download_document(document_id):
+            """下载文档"""
+            try:
+                db = get_db()
+                cursor = db.connection.cursor(pymysql.cursors.DictCursor)
+                cursor.execute('SELECT file_path, name FROM documents WHERE id = %s', (document_id,))
+                doc = cursor.fetchone()
+                
+                if not doc:
+                    return jsonify({'error': '文档不存在'}), 404
+                
+                if not os.path.exists(doc['file_path']):
+                    return jsonify({'error': '文档文件不存在'}), 404
+                
+                # 使用 send_file 发送文件，设置正确的下载名称
+                return send_file(
+                    doc['file_path'],
+                    as_attachment=True,
+                    download_name=doc['name'],
+                    mimetype='application/octet-stream'
+                )
+            except Exception as e:
+                print(f'下载文档失败: {e}')
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': str(e)}), 500
+
+        @app.route('/api/documents/<int:document_id>', methods=['DELETE'])
+        def delete_document(document_id):
+            """删除文档"""
+            try:
+                db = get_db()
+                doc_service = get_document_service(db)
+                
+                if doc_service.delete_document(document_id):
+                    return jsonify({'message': '删除成功'}), 200
+                else:
+                    return jsonify({'error': '删除失败'}), 500
+            except Exception as e:
+                print(f'删除文档失败: {e}')
+                return jsonify({'error': str(e)}), 500
+
+        @app.route('/api/documents/ask', methods=['POST'])
+        def ask_question():
+            """智能问答"""
+            try:
+                data = request.json
+                question = data.get('question', '')
+                area = data.get('area', None)
+                
+                if not question:
+                    return jsonify({'error': '问题不能为空'}), 400
+                
+                db = get_db()
+                doc_service = get_document_service(db)
+                rag_service = get_rag_service(doc_service)
+                
+                result = rag_service.ask_question(question, area)
+                
+                return jsonify(result)
+            except Exception as e:
+                print(f'问答失败: {e}')
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': str(e)}), 500
+
+    # 标签相关接口
+    # 确保 TAG_SERVICE_AVAILABLE 已定义
+    try:
+        _tag_service_available = TAG_SERVICE_AVAILABLE
+    except NameError:
+        _tag_service_available = False
+        print('[WARN] TAG_SERVICE_AVAILABLE 未定义，设置为 False')
+    
+    if _tag_service_available:
+        print('[OK] 注册标签相关API路由')
+        @app.route('/api/tags', methods=['GET'])
+        def get_tags():
+            """获取所有标签"""
+            try:
+                db = get_db()
+                if not db:
+                    print('[ERROR] /api/tags: 数据库连接失败')
+                    return jsonify({
+                        'error': '数据库连接失败',
+                        'message': '无法连接到数据库，请检查数据库配置'
+                    }), 500
+                
+                tag_service = get_tag_service(db)
+                if not tag_service:
+                    print('[ERROR] /api/tags: 标签服务初始化失败')
+                    return jsonify({
+                        'error': '标签服务初始化失败',
+                        'message': '无法初始化标签服务'
+                    }), 500
+                
+                tags = tag_service.get_all_tags()
+                # 确保返回的是列表格式
+                if tags is None:
+                    tags = []
+                
+                print(f'[INFO] /api/tags: 返回 {len(tags)} 个分类')
+                if len(tags) > 0:
+                    print(f'[INFO] /api/tags: 第一个分类: {tags[0].get("name", "N/A")}, 子分类数: {len(tags[0].get("children", []))}')
+                
+                return jsonify(tags)
+            except Exception as e:
+                print(f'[ERROR] 获取标签列表失败: {e}')
+                import traceback
+                traceback.print_exc()
+                return jsonify({
+                    'error': '获取标签列表失败',
+                    'message': str(e),
+                    'details': '请检查后端日志获取更多信息'
+                }), 500
+
+        @app.route('/api/tags/extract', methods=['POST'])
+        def extract_tags():
+            """从配置中提取标签并保存到数据库"""
+            try:
+                data = request.json
+                categories = data.get('categories', [])
+                
+                if not categories:
+                    return jsonify({'error': '标签数据为空'}), 400
+                
+                db = get_db()
+                tag_service = get_tag_service(db)
+                clear_existing = data.get('clear_existing', False)
+                count = tag_service.extract_and_save_tags(categories, clear_existing=clear_existing)
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'成功提取并保存 {count} 个标签',
+                    'count': count
+                })
+            except Exception as e:
+                print(f'提取标签失败: {e}')
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': str(e)}), 500
+        
+        @app.route('/api/tags/sync', methods=['POST'])
+        def sync_tags():
+            """从前端同步标签到数据库（会清空旧标签）"""
+            try:
+                data = request.json
+                categories = data.get('categories', [])
+                
+                if not categories:
+                    return jsonify({'success': False, 'error': '标签数据为空'}), 400
+                
+                db = get_db()
+                tag_service = get_tag_service(db)
+                result = tag_service.save_tags_from_frontend(categories)
+                
+                if result['success']:
+                    return jsonify(result)
+                else:
+                    return jsonify(result), 500
+            except Exception as e:
+                print(f'同步标签失败: {e}')
+                import traceback
+                traceback.print_exc()
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @app.route('/api/tags/counts', methods=['GET'])
+        def get_tag_counts():
+            """获取标签计数"""
+            try:
+                area = request.args.get('area', type=str)
+                db = get_db()
+                tag_service = get_tag_service(db)
+                counts = tag_service.get_tag_counts(area)
+                return jsonify(counts)
+            except Exception as e:
+                print(f'获取标签计数失败: {e}')
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': str(e)}), 500
+    else:
+        print('[WARN] 标签服务不可用，注册标签API错误处理路由')
+        # 添加诊断路由和错误处理路由
+        @app.route('/api/tags/status', methods=['GET'])
+        def tag_service_status():
+            """检查标签服务状态"""
+            return jsonify({
+                'available': False,
+                'message': '标签服务模块未加载，请检查后端日志',
+                'error': 'TAG_SERVICE_AVAILABLE = False'
+            }), 503
+        
+        # 如果标签服务不可用，为/api/tags提供友好的错误响应
+        @app.route('/api/tags', methods=['GET'])
+        def get_tags_unavailable():
+            """获取所有标签（标签服务不可用时的处理）"""
+            return jsonify({
+                'error': '标签服务不可用',
+                'message': '标签服务模块未加载，请检查后端日志并确保tag_service.py文件存在且无错误',
+                'available': False
+            }), 503
+    
+    # 确保 /api/tags 路由已注册（诊断信息）
+    print(f'[DEBUG] TAG_SERVICE_AVAILABLE = {_tag_service_available}')
+    print(f'[DEBUG] /api/tags 路由已注册')
+
     app.run(debug=True, port=8000, threaded=True)
 

@@ -20,6 +20,7 @@
 版本：1.0.0
 """
 import random
+import json
 from datetime import datetime, timedelta
 from faker import Faker
 from database import Database
@@ -547,37 +548,128 @@ def generate_people_data(db: Database, count: int = 8000):
         
         # 显示该省份完成情况
         if target_count > 0:
-            print(f'  ✓ {province}: {province_counts[province]}/{target_count}人')
+            print(f'  [OK] {province}: {province_counts[province]}/{target_count}人')
     
-    # 批量插入数据库
+    # 直接使用 SQL 插入，跳过查询返回，减少内存占用
     print('正在插入数据库...')
-    for idx, person in enumerate(people):
-        db.create_person(person)
-        # 每插入一定数量显示进度
-        if (idx + 1) % batch_size == 0 or (idx + 1) == len(people):
-            progress = (idx + 1) / len(people) * 100
-            print(f'  插入进度: {idx + 1}/{len(people)} ({progress:.1f}%)')
+    inserted_count = 0
+    cursor = db.connection.cursor()
     
-    print(f'✓ 已生成并插入 {count} 条人员数据')
+    for idx, person in enumerate(people):
+        try:
+            # 直接执行 INSERT，不查询返回结果
+            cursor.execute('''
+                INSERT INTO people (name, id_card, region, age, phone, status, avatar, last_update, 
+                                  gender, occupation, tags, education_history, work_history, social_media,
+                                  visit_records, flight_records, train_records, hometown, nationality, visa_type, institution)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (
+                person['name'],
+                person['idCard'],
+                person.get('region', ''),
+                int(person['age']),
+                person['phone'],
+                person['status'],
+                person.get('avatar', ''),
+                person.get('lastUpdate', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                person.get('gender', ''),
+                person.get('occupation', ''),
+                json.dumps(person.get('tags', []), ensure_ascii=False) if isinstance(person.get('tags'), list) else person.get('tags', '[]'),
+                json.dumps(person.get('educationHistory', []), ensure_ascii=False) if isinstance(person.get('educationHistory'), list) else person.get('educationHistory', '[]'),
+                json.dumps(person.get('workHistory', []), ensure_ascii=False) if isinstance(person.get('workHistory'), list) else person.get('workHistory', '[]'),
+                json.dumps(person.get('socialMedia', []), ensure_ascii=False) if isinstance(person.get('socialMedia'), list) else person.get('socialMedia', '[]'),
+                json.dumps(person.get('visitRecords', []), ensure_ascii=False) if isinstance(person.get('visitRecords'), list) else person.get('visitRecords', '[]'),
+                json.dumps(person.get('flightRecords', []), ensure_ascii=False) if isinstance(person.get('flightRecords'), list) else person.get('flightRecords', '[]'),
+                json.dumps(person.get('trainRecords', []), ensure_ascii=False) if isinstance(person.get('trainRecords'), list) else person.get('trainRecords', '[]'),
+                person.get('hometown', ''),
+                person.get('nationality', ''),
+                person.get('visaType', ''),
+                person.get('institution', '')
+            ))
+            inserted_count += 1
+            
+            # 每插入一定数量提交一次，减少内存占用
+            if (idx + 1) % 20 == 0:
+                db.connection.commit()
+                progress = (idx + 1) / len(people) * 100
+                print(f'  插入进度: {idx + 1}/{len(people)} ({progress:.1f}%)')
+                
+        except Exception as insert_error:
+            error_msg = str(insert_error)
+            # 如果是内存错误，等待一下再继续
+            if 'MEM' in error_msg or 'memory' in error_msg.lower():
+                print(f'  [WARN] 第 {idx + 1} 条数据插入时内存不足，等待后继续...')
+                import time
+                time.sleep(2)  # 等待2秒让内存释放
+                try:
+                    # 重试一次
+                    cursor.execute('''
+                        INSERT INTO people (name, id_card, region, age, phone, status, avatar, last_update, 
+                                          gender, occupation, tags, education_history, work_history, social_media,
+                                          visit_records, flight_records, train_records, hometown, nationality, visa_type, institution)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', (
+                        person['name'],
+                        person['idCard'],
+                        person.get('region', ''),
+                        int(person['age']),
+                        person['phone'],
+                        person['status'],
+                        person.get('avatar', ''),
+                        person.get('lastUpdate', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                        person.get('gender', ''),
+                        person.get('occupation', ''),
+                        json.dumps(person.get('tags', []), ensure_ascii=False) if isinstance(person.get('tags'), list) else person.get('tags', '[]'),
+                        json.dumps(person.get('educationHistory', []), ensure_ascii=False) if isinstance(person.get('educationHistory'), list) else person.get('educationHistory', '[]'),
+                        json.dumps(person.get('workHistory', []), ensure_ascii=False) if isinstance(person.get('workHistory'), list) else person.get('workHistory', '[]'),
+                        json.dumps(person.get('socialMedia', []), ensure_ascii=False) if isinstance(person.get('socialMedia'), list) else person.get('socialMedia', '[]'),
+                        json.dumps(person.get('visitRecords', []), ensure_ascii=False) if isinstance(person.get('visitRecords'), list) else person.get('visitRecords', '[]'),
+                        json.dumps(person.get('flightRecords', []), ensure_ascii=False) if isinstance(person.get('flightRecords'), list) else person.get('flightRecords', '[]'),
+                        json.dumps(person.get('trainRecords', []), ensure_ascii=False) if isinstance(person.get('trainRecords'), list) else person.get('trainRecords', '[]'),
+                        person.get('hometown', ''),
+                        person.get('nationality', ''),
+                        person.get('visaType', ''),
+                        person.get('institution', '')
+                    ))
+                    inserted_count += 1
+                except:
+                    print(f'  [ERROR] 重试后仍然失败，跳过第 {idx + 1} 条数据')
+                    continue
+            else:
+                print(f'  [WARN] 插入第 {idx + 1} 条数据失败: {error_msg[:100]}')
+                continue
+    
+    # 提交剩余的数据
+    db.connection.commit()
+    cursor.close()
+    print(f'[OK] 已生成并插入 {inserted_count}/{len(people)} 条人员数据')
+    
     return people
 
 
-def generate_movements_data(db: Database, people_count: int, movements_count: int = 200):
+def generate_movements_data(db: Database, people_list: list, movements_count: int = 200):
     """生成流动记录假数据"""
     print(f'正在生成 {movements_count} 条流动记录...')
     
+    if not people_list:
+        print('[WARN] 没有人员数据，跳过流动记录生成')
+        return []
+    
     movements = []
     for i in range(movements_count):
-        person_id = random.randint(1, people_count)
-        person = db.get_person(person_id)
+        # 从已有的人员列表中随机选择
+        person = random.choice(people_list)
+        # 使用索引+1作为person_id（因为数据是按顺序插入的）
+        person_idx = people_list.index(person)
+        person_id = person_idx + 1
         
         from_region = random.choice(REGIONS)
         to_region = random.choice([r for r in REGIONS if r != from_region])
         
         movement = {
             'personId': person_id,
-            'name': person['name'] if person else f'人员{person_id}',
-            'avatar': person['avatar'] if person else '/api/avatars/avatar_1.jpg',
+            'name': person.get('name', f'人员{person_id}'),
+            'avatar': person.get('avatar', '/api/avatars/avatar_1.jpg'),
             'from': from_region,
             'to': to_region,
             'time': (datetime.now() - timedelta(hours=random.randint(0, 720))).strftime('%Y-%m-%d %H:%M:%S'),
@@ -586,7 +678,7 @@ def generate_movements_data(db: Database, people_count: int, movements_count: in
         movements.append(movement)
         db.create_movement(movement)
     
-    print(f'✓ 已生成 {movements_count} 条流动记录')
+    print(f'[OK] 已生成 {movements_count} 条流动记录')
     return movements
 
 
@@ -603,7 +695,7 @@ def generate_map_data(db: Database):
         })
         db.update_map_data(province, value)
     
-    print(f'✓ 已生成 {len(map_data)} 个省份的地图数据')
+    print(f'[OK] 已生成 {len(map_data)} 个省份的地图数据')
     return map_data
 
 
@@ -634,7 +726,7 @@ def generate_trend_data(db: Database, days: int = 30):
         })
         db.create_trend_data(date, confirmed_count, suspected_count, recovered_count)
     
-    print(f'✓ 已生成 {len(trend_data)} 天的趋势数据')
+    print(f'[OK] 已生成 {len(trend_data)} 天的趋势数据')
     return trend_data
 
 
@@ -689,12 +781,12 @@ def generate_flow_statistics(db: Database, movements: list, periods: list = ['to
             db.create_flow_statistics(region, flow_count, period=period)
         
         flow_statistics.extend(flow_data)
-        print(f'✓ 已生成 {period} 周期的流动统计 ({len(flow_data)} 个地区)')
+        print(f'[OK] 已生成 {period} 周期的流动统计 ({len(flow_data)} 个地区)')
     
     return flow_statistics
 
 
-def init_database(clear_existing: bool = False, people_count: int = 8000, movements_count: int = 16000):
+def init_database(clear_existing: bool = False, people_count: int = 100, movements_count: int = 300):
     """初始化数据库
     
     Args:
@@ -714,28 +806,49 @@ def init_database(clear_existing: bool = False, people_count: int = 8000, moveme
         if clear_existing:
             print('清空现有数据...')
             db.clear_all_data()
-            print('✓ 已清空现有数据')
+            print('[OK] 已清空现有数据')
         
         # 生成人员数据
         people = generate_people_data(db, people_count)
         
-        # 生成流动记录
-        movements = generate_movements_data(db, people_count, movements_count)
+        # 生成流动记录（传入人员列表，避免查询数据库）
+        movements = generate_movements_data(db, people, movements_count)
         
         # 根据人员数据同步地图数据（确保地图显示实际的人员分布）
         print('正在根据人员数据同步地图数据...')
-        from map_sync import sync_map_data_from_people
-        sync_map_data_from_people(db)
-        map_data = db.get_map_data()
+        try:
+            from map_sync import sync_map_data_from_people
+            sync_map_data_from_people(db)
+            map_data = db.get_map_data()
+        except Exception as e:
+            print(f'[WARN] 同步地图数据失败（可能内存不足）: {e}')
+            map_data = []
         
         # 生成趋势数据（最近30天）
-        trend_data = generate_trend_data(db, days=30)
+        try:
+            trend_data = generate_trend_data(db, days=30)
+        except Exception as e:
+            print(f'[WARN] 生成趋势数据失败（可能内存不足）: {e}')
+            trend_data = []
         
         # 生成流动统计
-        flow_statistics = generate_flow_statistics(db, movements, periods=['today', 'week', 'month'])
+        try:
+            flow_statistics = generate_flow_statistics(db, movements, periods=['today', 'week', 'month'])
+        except Exception as e:
+            print(f'[WARN] 生成流动统计失败（可能内存不足）: {e}')
+            flow_statistics = []
         
-        # 显示统计信息
-        stats = db.get_stats()
+        # 显示统计信息（如果查询失败，使用默认值）
+        try:
+            stats = db.get_stats()
+        except Exception as e:
+            print(f'[WARN] 获取统计信息失败（可能内存不足）: {e}')
+            stats = {
+                'totalPeople': len(people),
+                'confirmedCases': 0,
+                'activeRegions': 0,
+                'todayMovements': 0
+            }
         print('\n' + '=' * 50)
         print('数据库初始化完成！')
         print('=' * 50)
@@ -749,7 +862,7 @@ def init_database(clear_existing: bool = False, people_count: int = 8000, moveme
         print('=' * 50)
         
     except Exception as e:
-        print(f'❌ 初始化失败: {e}')
+        print(f'[ERROR] 初始化失败: {e}')
         raise
     finally:
         db.disconnect()

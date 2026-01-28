@@ -56,12 +56,18 @@ export default {
     return api.get('/stats')
   },
 
-  // 获取人员列表（支持分页）
-  getPeople(page = null, pageSize = null) {
+  // 获取人员列表（支持分页、搜索、标签筛选）
+  getPeople(page = null, pageSize = null, search = null, tags = null) {
     const params = {}
     if (page !== null && pageSize !== null) {
       params.page = page
       params.page_size = pageSize
+    }
+    if (search) {
+      params.search = search
+    }
+    if (tags) {
+      params.tags = tags
     }
     return api.get('/people', { params })
   },
@@ -185,6 +191,65 @@ export default {
   // 获取当前用户信息
   getCurrentUser() {
     return api.get('/auth/me')
+  },
+
+  // 文档工作区相关接口
+  // 获取文档列表
+  getDocuments(area = 'public') {
+    return api.get('/documents', { params: { area } })
+  },
+
+  // 上传文档
+  uploadDocument(formData) {
+    return api.post('/documents/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+  },
+
+  // 获取文档预览
+  getDocumentPreview(documentId) {
+    return api.get(`/documents/${documentId}/preview`)
+  },
+
+  // 删除文档
+  deleteDocument(documentId) {
+    return api.delete(`/documents/${documentId}`)
+  },
+
+  // 下载文档（直接返回文件流）
+  downloadDocument(documentId) {
+    return api.get(`/documents/${documentId}/download`, {
+      responseType: 'blob'
+    })
+  },
+
+  // 智能问答
+  askQuestion(data) {
+    return api.post('/documents/ask', data)
+  },
+
+  // 标签相关接口
+  // 获取所有标签
+  getTags() {
+    return api.get('/tags')
+  },
+
+  // 提取标签到数据库
+  extractTags(categories) {
+    return api.post('/tags/extract', { categories })
+  },
+
+  // 同步标签到数据库（从前端标签管理页面）
+  syncTags(categories) {
+    return api.post('/tags/sync', { categories })
+  },
+
+  // 获取标签计数
+  getTagCounts(area = null) {
+    const params = area ? { area } : {}
+    return api.get('/tags/counts', { params })
   }
 }
 

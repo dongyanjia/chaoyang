@@ -6,7 +6,8 @@
   - 支持新增、编辑、删除各级标签和子分类
   - 每个分类/子分类可以添加子分类或标签，但不能同时有
   - 最多向下增加2级子分类（深度），即保证标签结构最多为4级
-  - 标签数据保存到localStorage
+  - 标签数据保存到Doris数据库和localStorage
+  - 优先从数据库加载，支持多端同步
   - 用于修改人员档案页的标签筛选
   
   四级结构：
@@ -32,14 +33,25 @@
         <div class="tree-header">
           <h2>标签结构</h2>
           <div class="header-actions">
+            <div v-if="loading" class="loading-indicator">
+              <span class="loading-spinner"></span>
+              <span class="loading-text">加载中...</span>
+            </div>
+            <div v-else-if="dataSource" class="data-source-indicator" :title="dataSourceTooltip">
+              <span class="data-source-icon">📊</span>
+              <span class="data-source-text">{{ dataSource }}</span>
+            </div>
             <div v-if="hasUnsavedChanges" class="unsaved-indicator">
               <span class="unsaved-dot"></span>
               <span class="unsaved-text">未保存</span>
             </div>
+            <button @click="refreshFromDatabase" class="btn-refresh" title="从数据库刷新标签数据">
+              🔄 刷新
+            </button>
             <button @click="applyCurrentTags" class="btn-apply" title="应用当前标签结构到人员档案页">
               应用
             </button>
-            <button @click="saveTags" class="btn-save" :class="{ 'has-unsaved': hasUnsavedChanges }">
+            <button @click="saveTags" class="btn-save" :class="{ 'has-unsaved': hasUnsavedChanges }" :disabled="loading">
               {{ hasUnsavedChanges ? '保存更改' : '已保存' }}
             </button>
             <button @click="addCategory" class="btn-add-category">
@@ -430,6 +442,9 @@ export default {
     const selectedVersionId = ref(null) // 选中的版本ID（用于应用版本）
     const expandedCategories = ref(new Set()) // 展开的分类ID集合
     const expandedSubCategories = ref(new Map()) // 展开的子分类ID集合，key为分类索引，value为子分类索引集合
+    const loading = ref(false) // 加载状态
+    const dataSource = ref('') // 数据来源：'数据库' | '本地缓存' | '默认数据'
+    const dataSourceTooltip = ref('') // 数据来源提示
 
     // 版本管理相关函数
     const VERSION_STORAGE_KEY = 'tag_categories_versions'
@@ -583,7 +598,11 @@ export default {
       currentVersionId.value = newVersion.id
       previousVersionData.value = JSON.parse(JSON.stringify(newData))
       saveVersions()
-      saveTagCategories(tagCategories.value)
+      saveTagCategories(tagCategories.value).then(result => {
+        if (result && result.message) {
+          console.log(result.message)
+        }
+      })
       hasUnsavedChanges.value = false
       alert(`已保存为新版本: ${name}`)
     }
@@ -622,7 +641,11 @@ export default {
         previousVersionData.value = JSON.parse(JSON.stringify(version.data))
         hasUnsavedChanges.value = false
         saveVersions()
-        saveTagCategories(tagCategories.value)
+        saveTagCategories(tagCategories.value).then(result => {
+          if (result && result.message) {
+            console.log(result.message)
+          }
+        })
         window.dispatchEvent(new Event('tagCategoriesUpdated'))
         alert('已应用该版本标签')
       }
@@ -642,7 +665,11 @@ export default {
           previousVersionData.value = JSON.parse(JSON.stringify(existingVersion.data))
           hasUnsavedChanges.value = false
           saveVersions()
-          saveTagCategories(tagCategories.value)
+          saveTagCategories(tagCategories.value).then(result => {
+            if (result && result.message) {
+              console.log(result.message)
+            }
+          })
         } else {
           // 如果不存在，保存为新版本
           const versionName = prompt('当前标签结构未保存，请输入版本名称（留空使用时间戳）:')
@@ -727,7 +754,11 @@ export default {
         currentVersionId.value = versionId
         previousVersionData.value = JSON.parse(JSON.stringify(version.data))
         saveVersions()
-        saveTagCategories(tagCategories.value)
+        saveTagCategories(tagCategories.value).then(result => {
+          if (result && result.message) {
+            console.log(result.message)
+          }
+        })
         hasUnsavedChanges.value = false
         window.dispatchEvent(new Event('tagCategoriesUpdated'))
         alert('已恢复到指定版本')
@@ -753,7 +784,11 @@ export default {
             if (tagVersions.value.length > 0) {
               currentVersionId.value = tagVersions.value[0].id
               tagCategories.value = JSON.parse(JSON.stringify(tagVersions.value[0].data))
-              saveTagCategories(tagCategories.value)
+              saveTagCategories(tagCategories.value).then(result => {
+                if (result && result.message) {
+                  console.log(result.message)
+                }
+              })
             } else {
               currentVersionId.value = null
               localStorage.removeItem(CURRENT_VERSION_KEY)
@@ -777,23 +812,93 @@ export default {
       })
     }
 
-    // 加载标签数据
-    const loadTags = () => {
+    // 加载标签数据（异步，支持从数据库加载）
+    const loadTags = async (forceFromDatabase = false) => {
+      loading.value = true
+      
       // 如果有当前版本，加载版本数据
-      if (currentVersionId.value) {
+      if (currentVersionId.value && !forceFromDatabase) {
         const version = tagVersions.value.find(v => v.id === currentVersionId.value)
         if (version) {
           tagCategories.value = JSON.parse(JSON.stringify(version.data))
           previousVersionData.value = JSON.parse(JSON.stringify(version.data))
           hasUnsavedChanges.value = false
+          dataSource.value = '版本数据'
+          dataSourceTooltip.value = '从本地版本管理加载'
+          loading.value = false
           return
         }
       }
       
-      // 否则加载默认数据
-      tagCategories.value = getTagCategories()
-      previousVersionData.value = JSON.parse(JSON.stringify(tagCategories.value))
-      hasUnsavedChanges.value = false
+      // 否则从数据库或localStorage加载
+      try {
+        const api = (await import('../api')).default
+        
+        // 优先从数据库加载
+        try {
+          const response = await api.getTags()
+          if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+            tagCategories.value = response.data
+            previousVersionData.value = JSON.parse(JSON.stringify(response.data))
+            hasUnsavedChanges.value = false
+            dataSource.value = '数据库'
+            dataSourceTooltip.value = '从Doris数据库加载'
+            // 保存到localStorage作为缓存
+            localStorage.setItem('tag_categories_data', JSON.stringify(response.data))
+            loading.value = false
+            return
+          }
+        } catch (error) {
+          console.warn('[标签] 从数据库读取失败:', error)
+          // 如果强制从数据库加载但失败，直接返回错误
+          if (forceFromDatabase) {
+            dataSource.value = '加载失败'
+            dataSourceTooltip.value = '从数据库加载失败: ' + (error.message || error)
+            loading.value = false
+            return
+          }
+        }
+        
+        // 从localStorage读取（仅在非强制数据库加载时）
+        if (!forceFromDatabase) {
+          const stored = localStorage.getItem('tag_categories_data')
+          if (stored) {
+            const parsed = JSON.parse(stored)
+            if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+              tagCategories.value = parsed
+              previousVersionData.value = JSON.parse(JSON.stringify(parsed))
+              hasUnsavedChanges.value = false
+              dataSource.value = '本地缓存'
+              dataSourceTooltip.value = '从本地缓存加载（数据库不可用）'
+              loading.value = false
+              return
+            }
+          }
+        }
+        
+        // 使用默认数据
+        tagCategories.value = DEFAULT_TAG_CATEGORIES
+        previousVersionData.value = JSON.parse(JSON.stringify(DEFAULT_TAG_CATEGORIES))
+        hasUnsavedChanges.value = false
+        dataSource.value = '默认数据'
+        dataSourceTooltip.value = '使用系统默认标签配置'
+      } catch (error) {
+        console.error('加载标签数据失败:', error)
+        // 如果加载失败，使用默认数据
+        tagCategories.value = DEFAULT_TAG_CATEGORIES
+        previousVersionData.value = JSON.parse(JSON.stringify(DEFAULT_TAG_CATEGORIES))
+        hasUnsavedChanges.value = false
+        dataSource.value = '默认数据'
+        dataSourceTooltip.value = '加载失败，使用默认配置'
+      } finally {
+        loading.value = false
+      }
+    }
+    
+    // 从数据库刷新标签数据
+    const refreshFromDatabase = async () => {
+      await loadTags(true)
+      alert('已从数据库刷新标签数据')
     }
 
     // 标记有未保存的更改
@@ -813,7 +918,11 @@ export default {
         previousVersionData.value = JSON.parse(JSON.stringify(existingVersion.data))
         hasUnsavedChanges.value = false
         saveVersions()
-        saveTagCategories(tagCategories.value)
+        saveTagCategories(tagCategories.value).then(result => {
+          if (result && result.message) {
+            console.log(result.message)
+          }
+        })
         alert('标签已保存（使用已有版本）')
       } else {
         // 如果不存在，保存为新版本
@@ -840,7 +949,11 @@ export default {
         currentVersionId.value = newVersion.id
         previousVersionData.value = JSON.parse(JSON.stringify(newData))
         saveVersions()
-        saveTagCategories(tagCategories.value)
+        saveTagCategories(tagCategories.value).then(result => {
+          if (result && result.message) {
+            console.log(result.message)
+          }
+        })
         hasUnsavedChanges.value = false
         alert(`标签已保存为新版本: ${name}`)
       }
@@ -1150,7 +1263,11 @@ export default {
             tagCategories.value = JSON.parse(JSON.stringify(version.data))
             hasUnsavedChanges.value = false
             previousVersionData.value = JSON.parse(JSON.stringify(version.data))
-            saveTagCategories(tagCategories.value)
+            saveTagCategories(tagCategories.value).then(result => {
+              if (result && result.message) {
+                console.log(result.message)
+              }
+            })
             window.dispatchEvent(new Event('tagCategoriesUpdated'))
             alert('已重置为当前版本')
             return
@@ -1167,7 +1284,11 @@ export default {
           hasUnsavedChanges.value = false
           previousVersionData.value = JSON.parse(JSON.stringify(defaultVersion.data))
           saveVersions()
-          saveTagCategories(tagCategories.value)
+          saveTagCategories(tagCategories.value).then(result => {
+            if (result && result.message) {
+              console.log(result.message)
+            }
+          })
           window.dispatchEvent(new Event('tagCategoriesUpdated'))
           alert('已重置为默认版本')
         }
@@ -1180,7 +1301,11 @@ export default {
           hasUnsavedChanges.value = false
           previousVersionData.value = JSON.parse(JSON.stringify(DEFAULT_TAG_CATEGORIES))
           saveVersions()
-          saveTagCategories(tagCategories.value)
+          saveTagCategories(tagCategories.value).then(result => {
+            if (result && result.message) {
+              console.log(result.message)
+            }
+          })
           window.dispatchEvent(new Event('tagCategoriesUpdated'))
           alert('已重置为默认标签数据')
         }
@@ -1201,6 +1326,9 @@ export default {
       selectedVersionName,
       selectedVersionLog,
       selectedVersionId,
+      loading,
+      dataSource,
+      dataSourceTooltip,
       viewVersionLog,
       selectVersion,
       applySelectedVersion,
@@ -1242,7 +1370,9 @@ export default {
       saveAsNewVersion,
       restoreVersion,
       deleteVersion,
-      formatTime
+      formatTime,
+      refreshFromDatabase,
+      resetToDefault
     }
   }
 }
@@ -1474,7 +1604,79 @@ export default {
 .unsaved-text {
   color: rgba(245, 158, 11, 0.9);
   font-size: 0.85rem;
+}
+
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 6px;
+}
+
+.loading-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  border-top-color: rgba(59, 130, 246, 0.9);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  color: rgba(59, 130, 246, 0.9);
+  font-size: 0.85rem;
+}
+
+.data-source-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 6px;
+}
+
+.data-source-icon {
+  font-size: 0.9rem;
+}
+
+.data-source-text {
+  color: rgba(16, 185, 129, 0.9);
+  font-size: 0.85rem;
   font-weight: 500;
+}
+
+.btn-refresh {
+  padding: 0.5rem 1rem;
+  background: rgba(59, 130, 246, 0.2);
+  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.btn-refresh:hover {
+  background: rgba(59, 130, 246, 0.3);
+  border-color: rgba(59, 130, 246, 0.6);
+  transform: translateY(-1px);
+}
+
+.btn-refresh:active {
+  transform: translateY(0);
 }
 
 .btn-save {
@@ -1500,6 +1702,12 @@ export default {
   background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
   box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
   animation: pulse-glow 2s infinite;
+}
+
+.btn-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 @keyframes pulse-glow {

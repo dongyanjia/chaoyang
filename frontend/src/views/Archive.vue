@@ -35,7 +35,7 @@
     </div>
 
     <!-- 横排标签筛选栏 -->
-    <div class="tag-filter-section" v-if="categories && categories.length > 0">
+    <div class="tag-filter-section" v-if="!tagsLoading && categories && categories.length > 0">
       <div class="tag-filter-header">
         <h3>筛选标签</h3>
         <button @click="clearAllFilters" class="btn-clear-filters" v-if="selectedTags.length > 0">
@@ -256,30 +256,73 @@ export default {
     const editingPerson = ref(null)
     const loading = ref(false)
     const loadingProgress = ref(0)
+    const tagsLoading = ref(true)  // 标签加载状态
     const provinces = ref(['北京市', '上海市', '天津市', '重庆市', '广东省', '浙江省', '江苏省', '山东省', '四川省', '湖北省', '河南省', '湖南省', '安徽省', '福建省', '陕西省', '辽宁省', '河北省', '江西省', '云南省', '广西壮族自治区', '贵州省', '山西省', '内蒙古自治区', '吉林省', '黑龙江省', '新疆维吾尔自治区', '甘肃省', '海南省', '宁夏回族自治区', '青海省', '西藏自治区', '香港特别行政区', '澳门特别行政区', '台湾省'])
     // 分页相关
     const currentPage = ref(1)
     const pageSize = ref(30)
 
-    // 从配置中加载标签结构（四级转三级）
-    const loadCategories = () => {
+    // 从后端或配置中加载标签结构
+    const loadCategories = async () => {
       try {
-        const fourLevelCategories = getTagCategories()
+        // 优先从后端获取标签
+        try {
+          const response = await api.getTags()
+          console.log('loadCategories: API response:', response)
+          if (response && response.data && Array.isArray(response.data) && response.data.length > 0) {
+            console.log('loadCategories: loaded from backend', response.data.length, 'categories')
+            // 后端返回的数据已经是三级结构，直接返回
+            return response.data
+          } else {
+            console.warn('loadCategories: 后端返回的数据为空或格式不正确:', response)
+          }
+        } catch (error) {
+          console.warn('从后端加载标签失败，使用本地配置:', error)
+        }
+        
+        // 降级到本地配置
+        const fourLevelCategories = await getTagCategories()
         const threeLevelCategories = convertToThreeLevel(fourLevelCategories)
-        console.log('loadCategories: loaded', threeLevelCategories.length, 'categories')
+        console.log('loadCategories: loaded from local config', threeLevelCategories.length, 'categories')
         return threeLevelCategories
       } catch (error) {
         console.error('loadCategories error:', error)
         return []
-          }
+      }
     }
     
-    const categories = ref(loadCategories())
+    const categories = ref([])
+    
+    // 初始化时加载标签
+    loadCategories().then(cats => {
+      console.log('loadCategories completed, categories:', cats)
+      console.log('categories length:', cats ? cats.length : 0)
+      if (cats && cats.length > 0) {
+        console.log('First category:', cats[0])
+        if (cats[0].children && cats[0].children.length > 0) {
+          console.log('First subCategory:', cats[0].children[0])
+          if (cats[0].children[0].tags && cats[0].children[0].tags.length > 0) {
+            console.log('First tags:', cats[0].children[0].tags.slice(0, 5))
+          }
+        }
+      }
+      categories.value = cats || []
+      tagsLoading.value = false
+      console.log('categories.value set to:', categories.value)
+      console.log('tagsLoading set to false')
+    }).catch(error => {
+      console.error('loadCategories failed:', error)
+      categories.value = []
+      tagsLoading.value = false
+    })
     
     // 监听localStorage变化，当标签管理页面修改标签时自动更新
-    const handleStorageChange = (e) => {
+    const handleStorageChange = async (e) => {
       if (e.key === 'tag_categories_data') {
-        categories.value = loadCategories()
+        tagsLoading.value = true
+        const cats = await loadCategories()
+        categories.value = cats || []
+        tagsLoading.value = false
         // 重新计算标签计数
         if (allPeople.value.length > 0) {
           calculateAllTagCounts()
@@ -389,24 +432,56 @@ export default {
     // 标签计数缓存
     const tagCountCache = ref({})
     
+    // 从后端获取标签计数
+    const fetchTagCountsFromBackend = async () => {
+      try {
+        const response = await api.getTagCounts()
+        if (response.data) {
+          // 转换后端返回的格式到前端需要的格式
+          const counts = {}
+          for (const [key, count] of Object.entries(response.data)) {
+            counts[key] = count
+          }
+          tagCountCache.value = counts
+          return true
+        }
+      } catch (error) {
+        console.warn('从后端获取标签计数失败，使用本地计算:', error)
+      }
+      return false
+    }
+    
     // 预计算所有标签的计数并缓存
-    const calculateAllTagCounts = () => {
+    const calculateAllTagCounts = async () => {
       // 如果数据为空，清空缓存
       if (!allPeople.value || allPeople.value.length === 0) {
         tagCountCache.value = {}
         return
       }
       
+      // 优先尝试从后端获取
+      const backendSuccess = await fetchTagCountsFromBackend()
+      if (backendSuccess) {
+        return
+      }
+      
+      // 降级到本地计算
       const cache = {}
       
       categories.value.forEach((category, catIndex) => {
         category.children.forEach((subCategory, subIndex) => {
           subCategory.tags.forEach((tag, tagIndex) => {
-            const cacheKey = `${catIndex}-${subIndex}-${tagIndex}`
+            // 使用新的键格式（与后端一致）
+            const tagKey = `${category.name}|${subCategory.name}|${tag}`
+            // 也保留旧的键格式以兼容
+            const oldCacheKey = `${catIndex}-${subIndex}-${tagIndex}`
+            
             const count = allPeople.value.filter(person => {
               return matchPersonByTag(person, catIndex, subIndex, tag)
             }).length
-            cache[cacheKey] = count
+            
+            cache[tagKey] = count
+            cache[oldCacheKey] = count  // 兼容旧格式
           })
         })
       })
@@ -416,17 +491,33 @@ export default {
     
     // 获取标签对应的数量（使用缓存）
     const getTagCount = (categoryIndex, subIndex, tagIndex) => {
-      const cacheKey = `${categoryIndex}-${subIndex}-${tagIndex}`
+      const category = categories.value[categoryIndex]
+      if (!category) return 0
       
-      // 如果缓存中有数据，直接返回
-      if (tagCountCache.value[cacheKey] !== undefined) {
-        return tagCountCache.value[cacheKey]
+      const subCategory = category.children?.[subIndex]
+      if (!subCategory) return 0
+      
+      const tag = subCategory.tags?.[tagIndex]
+      if (!tag) return 0
+      
+      // 构建标签键（与后端格式一致：category|subCategory|tag）
+      const tagKey = `${category.name}|${subCategory.name}|${tag}`
+      
+      // 从缓存中获取（后端返回的格式）
+      if (tagCountCache.value[tagKey] !== undefined) {
+        return tagCountCache.value[tagKey]
       }
       
-      // 如果缓存为空且数据已加载，立即计算并缓存（防止数据加载完成但缓存未计算的情况）
+      // 兼容旧的缓存键格式
+      const oldCacheKey = `${categoryIndex}-${subIndex}-${tagIndex}`
+      if (tagCountCache.value[oldCacheKey] !== undefined) {
+        return tagCountCache.value[oldCacheKey]
+      }
+      
+      // 如果缓存为空且数据已加载，立即计算并缓存
       if (allPeople.value.length > 0 && Object.keys(tagCountCache.value).length === 0) {
         calculateAllTagCounts()
-        return tagCountCache.value[cacheKey] || 0
+        return tagCountCache.value[tagKey] || tagCountCache.value[oldCacheKey] || 0
       }
       
       // 如果缓存为空且数据未加载，返回0
@@ -662,36 +753,52 @@ export default {
         // 检查是否有筛选条件
         const hasFilters = searchQuery.value || selectedTags.value.length > 0
         
-        // 如果有筛选条件或强制获取全部，需要获取所有数据
-        if (hasFilters || forceAll) {
+        // 构建请求参数
+        const params = {}
+        
+        // 添加搜索条件
+        if (searchQuery.value) {
+          params.search = searchQuery.value
+        }
+        
+        // 添加标签筛选条件
+        if (selectedTags.value.length > 0) {
+          params.tags = JSON.stringify(selectedTags.value.map(t => ({
+            categoryName: t.categoryName,
+            subCategoryName: t.subCategoryName,
+            tagName: t.tagName
+          })))
+        }
+        
+        // 如果有筛选条件，使用标签筛选接口（后端会处理）
+        if (hasFilters) {
           await updateProgress(30, 200)
-          const response = await api.getPeople() // 获取所有数据
+          
+          // 使用分页参数
+          params.page = currentPage.value
+          params.page_size = pageSize.value
+          
+          const response = await api.getPeople(params.page, params.page_size, params.search, params.tags)
           await updateProgress(90, 300)
           
-          // 处理数据（可能是数组或分页格式）
+          // 处理数据
           let peopleData = []
-          if (Array.isArray(response.data)) {
-            peopleData = response.data
-          } else if (response.data && response.data.data) {
+          let pagination = null
+          
+          if (response.data && response.data.data) {
             peopleData = response.data.data
-          } else if (response.data && Array.isArray(response.data)) {
+            pagination = response.data.pagination
+          } else if (Array.isArray(response.data)) {
             peopleData = response.data
           } else {
-            peopleData = response.data || []
+            peopleData = []
           }
           
+          // 有筛选条件时，使用 allPeople 存储结果
           allPeople.value = peopleData
-          console.log('fetchPeople: loaded', allPeople.value.length, 'people')
-          if (allPeople.value.length > 0) {
-            console.log('Sample person:', allPeople.value[0])
-            console.log('Sample person gender:', allPeople.value[0].gender)
-          }
+          paginationInfo.value = pagination
           
-          // 更新标签计数缓存
-          calculateAllTagCounts()
-          
-          // 有筛选条件时，不需要设置 people.value，filteredPeople 会使用 filteredPeopleAll
-          paginationInfo.value = null
+          console.log('fetchPeople: loaded', allPeople.value.length, 'people with filters')
         } else {
           // 无筛选条件时，使用后端分页
           await updateProgress(30, 200)
@@ -704,11 +811,9 @@ export default {
           
           // 处理分页数据
           if (response.data && response.data.data) {
-            // 新格式：有分页信息
             people.value = response.data.data
             paginationInfo.value = response.data.pagination
           } else if (Array.isArray(response.data)) {
-            // 旧格式：直接返回数组
             people.value = response.data
             paginationInfo.value = null
           } else {
@@ -716,6 +821,9 @@ export default {
             paginationInfo.value = null
           }
         }
+        
+        // 更新标签计数缓存
+        await calculateAllTagCounts()
         
         await updateProgress(100, 100)
         

@@ -38,8 +38,12 @@
             </svg>
           </div>
         </div>
-        <h1 class="login-title">流感监测系统</h1>
-        <p class="login-subtitle">Flu Monitoring System</p>
+        <h1 class="login-title">智能监测系统</h1>
+        <p class="login-subtitle">AI-Powered Monitoring System</p>
+        <div class="ai-badge">
+          <span class="ai-icon">🤖</span>
+          <span>AI 智能分析</span>
+        </div>
       </div>
 
       <!-- 登录表单 -->
@@ -206,7 +210,11 @@ export default {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1419 100%);
+  background: #0a0a0f;
+  background-image: 
+    radial-gradient(circle at 20% 30%, rgba(102, 126, 234, 0.2) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(118, 75, 162, 0.2) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
 }
 
 /* 背景动画效果 */
@@ -304,18 +312,46 @@ export default {
 .login-card {
   position: relative;
   z-index: 1;
-  width: 420px;
+  width: 450px;
   max-width: 90vw;
-  padding: 3rem 2.5rem;
-  background: rgba(15, 20, 30, 0.85);
-  backdrop-filter: blur(20px);
-  border-radius: 20px;
-  border: 1px solid rgba(102, 126, 234, 0.3);
+  padding: 3.5rem 3rem;
+  background: rgba(10, 10, 15, 0.75);
+  backdrop-filter: blur(30px) saturate(180%);
+  border-radius: 24px;
+  border: 1px solid rgba(102, 126, 234, 0.2);
   box-shadow: 
-    0 20px 60px rgba(0, 0, 0, 0.5),
+    0 25px 80px rgba(0, 0, 0, 0.6),
     0 0 0 1px rgba(102, 126, 234, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  animation: cardFadeIn 0.6s ease-out;
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 100px rgba(102, 126, 234, 0.1);
+  animation: cardFadeIn 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.login-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(102, 126, 234, 0.8), 
+    rgba(118, 75, 162, 0.8), 
+    rgba(59, 130, 246, 0.8), 
+    transparent
+  );
+  animation: scanLine 3s linear infinite;
+}
+
+@keyframes scanLine {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 @keyframes cardFadeIn {
@@ -366,21 +402,71 @@ export default {
 
 .login-title {
   margin: 0 0 0.5rem 0;
-  font-size: 2rem;
+  font-size: 2.2rem;
   font-weight: 700;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #3b82f6 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  letter-spacing: 2px;
+  letter-spacing: 1px;
+  text-shadow: 0 0 40px rgba(102, 126, 234, 0.5);
+  animation: titleGlow 3s ease-in-out infinite;
+}
+
+@keyframes titleGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 10px rgba(102, 126, 234, 0.5));
+  }
+  50% {
+    filter: drop-shadow(0 0 20px rgba(102, 126, 234, 0.8));
+  }
 }
 
 .login-subtitle {
-  margin: 0;
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 3px;
+  margin: 0 0 1rem 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 2px;
   font-weight: 300;
+  text-transform: uppercase;
+}
+
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  margin-top: 0.5rem;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 20px;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  animation: badgePulse 2s ease-in-out infinite;
+}
+
+@keyframes badgePulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+  }
+}
+
+.ai-icon {
+  font-size: 1rem;
+  animation: aiFloat 2s ease-in-out infinite;
+}
+
+@keyframes aiFloat {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
 }
 
 /* 表单样式 */
@@ -415,25 +501,30 @@ export default {
 
 .form-input {
   width: 100%;
-  padding: 0.9rem 1rem;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(102, 126, 234, 0.3);
-  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+  border-radius: 10px;
   color: #fff;
   font-size: 1rem;
-  transition: all 0.3s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-sizing: border-box;
+  backdrop-filter: blur(10px);
 }
 
 .form-input::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.25);
 }
 
 .form-input:focus {
   outline: none;
   border-color: #667eea;
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 
+    0 0 0 4px rgba(102, 126, 234, 0.15),
+    0 0 20px rgba(102, 126, 234, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
 }
 
 .form-input:focus + .input-border {
@@ -498,18 +589,32 @@ export default {
 .login-button {
   position: relative;
   width: 100%;
-  padding: 1rem;
+  padding: 1.1rem;
   margin-top: 0.5rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #3b82f6 100%);
+  background-size: 200% 200%;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   color: white;
   font-size: 1.1rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  box-shadow: 
+    0 6px 20px rgba(102, 126, 234, 0.4),
+    0 0 30px rgba(102, 126, 234, 0.2);
+  animation: gradientShift 3s ease infinite;
+  letter-spacing: 0.5px;
+}
+
+@keyframes gradientShift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
 }
 
 .login-button::before {
@@ -529,7 +634,10 @@ export default {
 
 .login-button:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+  box-shadow: 
+    0 8px 25px rgba(102, 126, 234, 0.6),
+    0 0 40px rgba(102, 126, 234, 0.3);
+  filter: brightness(1.1);
 }
 
 .login-button:active {

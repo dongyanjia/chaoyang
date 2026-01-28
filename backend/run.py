@@ -25,17 +25,27 @@ if __name__ == '__main__':
     avatars_dir = os.path.join(os.path.dirname(__file__), 'avatars')
     if not os.path.exists(avatars_dir) or len(os.listdir(avatars_dir)) == 0:
         print('检测到头像目录为空，正在生成头像...')
-        from generate_avatars import generate_avatar
-        os.makedirs(avatars_dir, exist_ok=True)
-        # 生成20个默认头像
-        for i in range(1, 21):
-            generate_avatar(f'avatar_{i}.jpg')
-        print('头像生成完成！')
+        try:
+            from generate_avatars import generate_avatar
+            os.makedirs(avatars_dir, exist_ok=True)
+            # 生成20个默认头像
+            for i in range(1, 21):
+                generate_avatar(f'avatar_{i}.jpg')
+            print('头像生成完成！')
+        except Exception as e:
+            print(f'生成头像失败: {e}')
     
-    print('启动后端服务...')
-    print('后端API地址: http://localhost:8000')
+    # 从环境变量读取配置
+    flask_env = os.getenv('FLASK_ENV', 'development')
+    debug_mode = flask_env == 'development' or os.getenv('FLASK_DEBUG', '0') == '1'
+    port = int(os.getenv('PORT', 8000))
+    host = os.getenv('HOST', '0.0.0.0')
+    
+    print(f'启动后端服务...')
+    print(f'环境: {flask_env}')
+    print(f'调试模式: {debug_mode}')
+    print(f'后端API地址: http://{host}:{port}')
+    
     # 启动Flask应用
-    # debug=True: 开启调试模式，代码修改后自动重载
-    # host='0.0.0.0': 允许外部访问
-    app.run(debug=True, port=8000, host='0.0.0.0')
+    app.run(debug=debug_mode, port=port, host=host)
 
