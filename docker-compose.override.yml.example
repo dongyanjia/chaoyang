@@ -1,0 +1,41 @@
+# Docker Compose 覆盖文件示例
+# 复制此文件为 docker-compose.override.yml 来自定义配置
+# docker-compose 会自动读取 docker-compose.override.yml
+
+services:
+  backend:
+    environment:
+      # 自定义数据库配置
+      # - DORIS_HOST=your-doris-host
+      # - DORIS_PORT=9030
+      # - DORIS_USER=root
+      # - DORIS_PASSWORD=your-password
+      
+    # 自定义端口映射
+    # ports:
+    #   - "8001:8000"
+    
+    # 资源限制
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 1G
+
+  frontend:
+    # 自定义端口映射
+    # ports:
+    #   - "8080:80"
+    
+    # 资源限制
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.5'
+    #       memory: 512M
+    #     reservations:
+    #       cpus: '0.25'
+    #       memory: 256M
