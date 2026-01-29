@@ -69,8 +69,8 @@
                 @click="toggleTag(catIndex, subIndex, tagIndex)"
               >
                 {{ tag }}
-                <span class="tag-count" v-if="getTagCount(catIndex, subIndex, tagIndex) > 0">
-                  ({{ getTagCount(catIndex, subIndex, tagIndex) }})
+                <span class="tag-count" v-if="tagCountCache[`${category.name}|${subCategory.name}|${tag}`] > 0">
+                  ({{ tagCountCache[`${category.name}|${subCategory.name}|${tag}`] }})
                 </span>
               </span>
             </div>
@@ -431,10 +431,19 @@ export default {
 
     // 标签计数缓存
     const tagCountCache = ref({})
+    const isLoadingTagCounts = ref(false)  // 防止重复加载
+    const tagCountsLoaded = ref(false)     // 标记是否已加载过
     
     // 从后端获取标签计数
     const fetchTagCountsFromBackend = async () => {
+      if (isLoadingTagCounts.value) {
+        console.log('标签计数正在加载中，跳过重复请求')
+        return false
+      }
+      
       try {
+        isLoadingTagCounts.value = true
+        console.log('开始从后端获取标签计数...')
         const response = await api.getTagCounts()
         if (response.data) {
           // 转换后端返回的格式到前端需要的格式
@@ -443,10 +452,14 @@ export default {
             counts[key] = count
           }
           tagCountCache.value = counts
+          tagCountsLoaded.value = true
+          console.log('标签计数加载成功，共', Object.keys(counts).length, '个标签')
           return true
         }
       } catch (error) {
         console.warn('从后端获取标签计数失败，使用本地计算:', error)
+      } finally {
+        isLoadingTagCounts.value = false
       }
       return false
     }
@@ -456,6 +469,13 @@ export default {
       // 如果数据为空，清空缓存
       if (!allPeople.value || allPeople.value.length === 0) {
         tagCountCache.value = {}
+        tagCountsLoaded.value = false
+        return
+      }
+      
+      // 如果已经加载过且缓存不为空，跳过
+      if (tagCountsLoaded.value && Object.keys(tagCountCache.value).length > 0) {
+        console.log('标签计数已存在，跳过重复计算')
         return
       }
       
@@ -466,6 +486,7 @@ export default {
       }
       
       // 降级到本地计算
+      console.log('使用本地计算标签计数...')
       const cache = {}
       
       categories.value.forEach((category, catIndex) => {
@@ -487,6 +508,8 @@ export default {
       })
       
       tagCountCache.value = cache
+      tagCountsLoaded.value = true
+      console.log('本地计算标签计数完成，共', Object.keys(cache).length, '个标签')
     }
     
     // 获取标签对应的数量（使用缓存）
@@ -514,13 +537,7 @@ export default {
         return tagCountCache.value[oldCacheKey]
       }
       
-      // 如果缓存为空且数据已加载，立即计算并缓存
-      if (allPeople.value.length > 0 && Object.keys(tagCountCache.value).length === 0) {
-        calculateAllTagCounts()
-        return tagCountCache.value[tagKey] || tagCountCache.value[oldCacheKey] || 0
-      }
-      
-      // 如果缓存为空且数据未加载，返回0
+      // 如果缓存为空，返回0（不触发计算，避免性能问题）
       return 0
     }
     
@@ -1024,7 +1041,9 @@ export default {
       changePage,
       visiblePages,
       handleImageError,
-      provinces
+      provinces,
+      tagCountCache,
+      tagsLoading
     }
   }
 }
